@@ -1,0 +1,21 @@
+{
+  "currency": "XAF",
+  "documentTypePricing": {
+    "report": {
+      "label": "Student Report",
+      "basePriceCfa": 500
+    },
+    "undergraduate": {
+      "label": "Undergraduate Thesis",
+      "basePriceCfa": 1500
+    },
+    "masters": {
+      "label": "Masters Thesis",
+      "basePriceCfa": 2500
+    },
+    "phd": {
+      "label": "PhD Thesis",
+      "basePriceCfa": 4000
+    }
+  }
+}

@@ -1,111 +1,156 @@
-# formatter-service/formatting/formatter.py
+from __future__ import annotations
 
-import logging
+from io import BytesIO
+from typing import Any, Dict, List, Optional
+from docx.text.paragraph import Paragraph 
+from docx.enum.section import WD_SECTION
+
 from docx import Document
 
-# Import directly from the modules that exist
-from .extractor_wrapper import extract_for_model, extract_original_tables, extract_original_images
-from .llm_client import structure_document
-from .body import apply_body_font, apply_paragraph_format
-from .page_numbers import add_page_numbers
-from .margins import apply_ub_margins
+from config.profiles import load_profile
+from .heading_builder import apply_headings
+from .section_builder import apply_sections
+from .toc_builder import insert_table_of_contents
+from .table_figure_builder import insert_list_of_entries
+from .basic_style import apply_basic_style
+from .references_builder import format_references_section
 
-# Try different builder imports
-try:
-    from .doc_builder import build_docx_from_structure  # If doc_builder.py exists
-except ImportError:
-    try:
-        from .doc_builder_wrapper import build_docx_from_structure  # If builder.py exists
-    except ImportError:
-        # Fallback: import from the test that worked
-        import sys
-        import os
-        sys.path.append(os.path.dirname(__file__))
-        from doc_builder.base_builder import DocumentBuilder
-        def build_docx_from_structure(structured_doc, preserved_tables=None, preserved_images=None):
-            builder = DocumentBuilder()
-            return builder.build_docx_from_structure(structured_doc, preserved_tables, preserved_images)
 
-logger = logging.getLogger(__name__)
-
-def format_docx(input_path: str, output_path: str) -> None:
+# --- HELPER FUNCTION (For finding anchor) ---
+def _get_paragraph_index_for_block(
+    blocks: List[Dict[str, Any]],
+    target_block_id: str,
+    doc_paragraphs: List[Paragraph],
+) -> Optional[int]:
     """
-    DocStudio v2 - LLM-powered formatter pipeline
+    Walk through blocks and map paragraph-type blocks to
+    indices in doc.paragraphs (same order as original DOCX).
     """
-    logger.info(f"Starting LLM-powered formatting for: {input_path}")
+    para_index = -1
+
+    for block in blocks:
+        if block.get("type") != "paragraph":
+            continue
+
+        para_index += 1
+        if block.get("id") == target_block_id:
+            if 0 <= para_index < len(doc_paragraphs):
+                return para_index
+            return None
+
+    return None
+
+def _get_paragraph_by_block_id(doc: Document, blocks: List[Dict[str, Any]], block_id: str) -> Optional[Paragraph]:
+    """Helper to get a Paragraph object by its block ID."""
+    para_index = _get_paragraph_index_for_block(blocks, block_id, doc.paragraphs)
+    if para_index is not None:
+        return doc.paragraphs[para_index]
+    return None
+# -----------------------------------------------------------------
+
+
+def format_docx(
+    input_path: str,
+    blocks: List[Dict[str, Any]],
+    metadata: Dict[str, Any],
+    profile_id: Optional[str] = None,
+) -> bytes:
+    """
+    Main entry point for building the final formatted DOCX.
+    """
+
+    profile = load_profile(profile_id)
+    doc = Document(input_path)
     
+    # 1. Apply styles and headings (must happen first)
     try:
-        # 1) EXTRACTION PHASE
-        logger.info("Phase 1: Extracting document content...")
-        extracted = extract_for_model(input_path)
-        preserved_tables = extract_original_tables(input_path)
-        preserved_images = extract_original_images(input_path)
+        apply_basic_style(doc, profile, metadata)
+    except Exception as exc:
+        print(f"[WARN] apply_basic_style failed: {exc}")
         
-        logger.info(f"Extracted: {len(extracted['paragraphs'])} paragraphs, "
-                   f"{len(extracted['tables'])} tables, {len(extracted['images'])} images")
+    try:
+        apply_headings(doc, blocks, metadata, profile)
+    except Exception as exc:
+        print(f"[WARN] apply_headings failed: {exc}")
 
-        # 2) STRUCTURING PHASE
-        logger.info("Phase 2: Structuring document with LLM...")
-        structured_doc = structure_document(extracted)
-        
-        # DEBUG: Check what the LLM returned
-        logger.info("=== LLM OUTPUT DEBUG ===")
-        logger.info(f"Chapters: {len(structured_doc.get('chapters', []))}")
-        total_paragraphs = 0
-        for i, chapter in enumerate(structured_doc.get('chapters', [])):
-            chapter_paragraphs = len(chapter.get('paragraphs', []))
-            total_paragraphs += chapter_paragraphs
-            logger.info(f"Chapter {i}: '{chapter.get('title', 'No title')}'")
-            logger.info(f"  - Paragraphs: {chapter_paragraphs}")
-            logger.info(f"  - Subsections: {len(chapter.get('subsections', []))}")
+
+    # 2. Find the Main Content Anchor (Paragraph just before Chapter 1)
+    
+    # The anchor is the paragraph immediately preceding the main content (Chapter 1)
+    boundary_id = metadata.get("sections", {}).get("prelim_ends_before_block_id")
+    main_content_anchor = _get_paragraph_by_block_id(doc, blocks, boundary_id)
+    
+    if main_content_anchor is None:
+        # Fallback to the first paragraph
+        main_content_anchor = doc.paragraphs[0] if doc.paragraphs else doc.add_paragraph()
+
+
+    # 3. Orchestrate Sequential Insertion (TOC -> LOT -> LOF)
+    
+    # We must insert in reverse order: LOF -> LOT -> TOC
+    current_anchor = main_content_anchor
+    
+    # List of items to GENERATE and place (in their final required order: TOC -> LOT -> LOF)
+    # NOTE: The order here must match your final requirement. Example: TOC -> LOT -> LOF
+    generated_prelim_items = ["tableOfContents", "listOfTables", "listOfFigures"]
+    
+    # We iterate in reverse: i=0 is LOF, i=1 is LOT, i=2 is TOC
+    # This loop inserts the generated content *before* the main content anchor.
+    for i, item_key in enumerate(reversed(generated_prelim_items)):
+        try:
+            inserted_title_para = None
             
-            # Debug subsections too
-            for j, subsection in enumerate(chapter.get('subsections', [])):
-                sub_paragraphs = len(subsection.get('paragraphs', []))
-                total_paragraphs += sub_paragraphs
-                logger.info(f"    Subsection {j}: '{subsection.get('title', 'No title')}'")
-                logger.info(f"      - Paragraphs: {sub_paragraphs}")
-        
-        # Check preliminaries content
-        preliminaries = structured_doc.get('preliminaries', {})
-        logger.info(f"Preliminaries - Abstract: {len(preliminaries.get('abstract', []))} paragraphs")
-        logger.info(f"Preliminaries - Dedication: {len(preliminaries.get('dedication', []))} paragraphs")
-        logger.info(f"Preliminaries - Acknowledgement: {len(preliminaries.get('acknowledgement', []))} paragraphs")
-        
-        logger.info(f"TOTAL PARAGRAPHS IN STRUCTURE: {total_paragraphs}")
-        logger.info(f"TOTAL PARAGRAPHS EXTRACTED: {len(extracted['paragraphs'])}")
-        logger.info("=== END DEBUG ===")
-        
-        logger.info(f"Structured: {len(structured_doc.get('chapters', []))} chapters")
+            # The item that separates prelim from main (LOF) is the first item we insert (i=0).
+            is_last_prelim_page_in_flow = (i == 0)
 
-        # 3) BUILDING PHASE
-        logger.info("Phase 3: Building formatted DOCX...")
-        doc = build_docx_from_structure(structured_doc, preserved_tables, preserved_images)
-        
-        # DEBUG: Check what was actually built
-        logger.info("=== BUILDER OUTPUT DEBUG ===")
-        logger.info(f"Final document paragraphs: {len(doc.paragraphs)}")
-        logger.info("=== END BUILDER DEBUG ===")
-        
-        # 4) FORMATTING PHASE
-        logger.info("Phase 4: Applying UB formatting...")
-        _apply_ub_formatting(doc)
+            if item_key == "listOfFigures":
+                inserted_title_para = insert_list_of_entries(
+                    doc, 
+                    metadata, 
+                    title="LIST OF FIGURES", 
+                    caption_label="Figure", 
+                    anchor_para=current_anchor,
+                    is_last_prelim_page=is_last_prelim_page_in_flow
+                )
+                    
+            elif item_key == "listOfTables":
+                inserted_title_para = insert_list_of_entries(
+                    doc, 
+                    metadata, 
+                    title="LIST OF TABLES", 
+                    caption_label="Table", 
+                    anchor_para=current_anchor,
+                    is_last_prelim_page=is_last_prelim_page_in_flow
+                )
+            
+            elif item_key == "tableOfContents":
+                inserted_title_para = insert_table_of_contents(
+                    doc, 
+                    metadata, 
+                    anchor_para=current_anchor,
+                    is_last_prelim_page=is_last_prelim_page_in_flow
+                )
+            
+            # If we inserted something, the newly inserted title paragraph becomes the new anchor
+            if inserted_title_para:
+                current_anchor = inserted_title_para
 
-        # Save final document
-        logger.info(f"Saving formatted document to: {output_path}")
-        doc.save(output_path)
-        
-        logger.info("✅ Formatting completed successfully!")
+        except Exception as exc:
+            print(f"[WARN] Failed to insert/position {item_key}: {exc}")
 
-    except Exception as e:
-        logger.error(f"❌ Formatting failed: {e}")
-        raise
-
-def _apply_ub_formatting(doc: Document) -> None:
-    """Apply University of Buea formatting."""
-    for paragraph in doc.paragraphs:
-        apply_body_font(paragraph)
-        apply_paragraph_format(paragraph)
+    # 4. References and Sections
+    try:
+        format_references_section(doc, blocks, metadata, profile)
+    except Exception as exc:
+        print(f"[WARN] format_references_section raised unexpectedly: {exc}")
     
-    apply_ub_margins(doc)
-    add_page_numbers(doc)
+    # 5. Apply Sections (Must run last to apply Roman/Arabic page numbering)
+    try:
+        apply_sections(doc, blocks, metadata)
+    except Exception as exc:
+        print(f"[WARN] apply_sections failed: {exc}")
+
+    # 6. Save to bytes
+    bio = BytesIO()
+    doc.save(bio)
+    return bio.getvalue()

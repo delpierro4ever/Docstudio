@@ -24,16 +24,13 @@ export default function DocumentsPage() {
 
   useEffect(() => {
     const uid = getUserId();
-    if (!uid) {
-      router.push("/login");
-      return;
-    }
+    // Login check temporarily disabled for testing
 
     async function loadJobs() {
       try {
         const res = await apiRequest<JobListItem[]>("/documents", {
           headers: {
-            "x-user-id": uid,
+            "x-user-id": uid || "",
           },
         });
         setJobs(res);
@@ -56,48 +53,29 @@ export default function DocumentsPage() {
 
   async function handleDownload(jobId: string) {
     const uid = getUserId();
-    if (!uid) {
-      router.push("/login");
-      return;
-    }
+    // Login check temporarily disabled for testing
 
+    // Direct link to avoid Blob memory issues and browser interruptions
     try {
       setDownloadingId(jobId);
       setError("");
 
-      const res = await fetch(
-        `http://localhost:4000/documents/${jobId}/download`,
-        {
-          method: "GET",
-          headers: {
-            "x-user-id": uid,
-          },
-        }
-      );
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("Download error:", text);
-        setError("Failed to download file.");
-        return;
-      }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const downloadUrl = `http://localhost:8000/documents/${jobId}/download`;
 
       const link = document.createElement("a");
-      link.href = url;
-      link.download = `${jobId}.docx`;
+      link.href = downloadUrl;
+      link.setAttribute('download', `${jobId}.docx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
 
-      URL.revokeObjectURL(url);
+      // Hand off to browser download manager
     } catch (err) {
       console.error(err);
       setError("Failed to download file.");
     } finally {
-      setDownloadingId(null);
+      // Small delay to reset UI state
+      setTimeout(() => setDownloadingId(null), 1000);
     }
   }
 
@@ -248,11 +226,10 @@ export default function DocumentsPage() {
                   {jobs.map((job, index) => (
                     <tr
                       key={job.id}
-                      className={`border-b border-slate-800/80 ${
-                        index % 2 === 0
-                          ? "bg-slate-950/40"
-                          : "bg-slate-900/40"
-                      } hover:bg-slate-800/60`}
+                      className={`border-b border-slate-800/80 ${index % 2 === 0
+                        ? "bg-slate-950/40"
+                        : "bg-slate-900/40"
+                        } hover:bg-slate-800/60`}
                     >
                       <td className="border border-slate-800/80 px-3 py-2 align-top">
                         <span className="font-mono text-[11px] text-slate-200 break-all">
@@ -277,11 +254,10 @@ export default function DocumentsPage() {
                       </td>
                       <td className="border border-slate-800/80 px-3 py-2 align-top">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] border border-slate-500/40 ${
-                            job.isFree
-                              ? "bg-emerald-500/10 text-emerald-200"
-                              : "bg-slate-500/10 text-slate-200"
-                          }`}
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] border border-slate-500/40 ${job.isFree
+                            ? "bg-emerald-500/10 text-emerald-200"
+                            : "bg-slate-500/10 text-slate-200"
+                            }`}
                         >
                           {job.isFree ? "Free" : "Paid"}
                         </span>

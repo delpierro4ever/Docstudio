@@ -17,51 +17,24 @@ interface MeResponse {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<MeResponse | null>(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const uid = getUserId();
-
-    if (!uid) {
-      router.push("/login");
-      return;
-    }
-
-    async function loadUser() {
-      try {
-        const res = await apiRequest<MeResponse>("/auth/me", {
-          headers: {
-            "x-user-id": uid,
-          },
-        });
-        setUser(res);
-      } catch (err) {
-        console.error(err);
-        logout();
-        router.push("/login");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadUser();
-  }, [router]);
+  // Mock user data for testing without authentication
+  const user: MeResponse = {
+    id: "test-user-123",
+    fullName: "Test User",
+    email: "test@docstudio.com",
+    phone: "",
+    role: "individual",
+    centerId: null,
+    freeRemaining: 5,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
 
   function handleLogout() {
-    logout();
-    router.push("/login");
+    // Logout disabled for testing
+    console.log("Logout clicked (disabled for testing)");
   }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="text-slate-200 text-sm">Loading dashboard…</div>
-      </div>
-    );
-  }
-
-  if (!user) return null;
 
   const isCenterAdmin = user.role === "center-admin";
 

@@ -39,7 +39,7 @@ export default function UploadPage() {
     async function loadProfiles() {
       try {
         setLoadingProfiles(true);
-        const res = await fetch("http://localhost:4000/profiles");
+        const res = await fetch("http://localhost:8000/profiles");
         const data = await res.json();
 
         setProfiles(data);
@@ -65,10 +65,7 @@ export default function UploadPage() {
     setError(null);
 
     const uid = getUserId();
-    if (!uid) {
-      router.push("/login");
-      return;
-    }
+    // Login check temporarily disabled for testing
 
     if (!file) {
       setError("Please select a .docx file.");
@@ -87,7 +84,7 @@ export default function UploadPage() {
       formData.append("documentType", documentType);
       formData.append("profileId", profileId);
 
-      const res = await fetch("http://localhost:4000/documents", {
+      const res = await fetch("http://localhost:8000/documents", {
         method: "POST",
         headers: {
           "x-user-id": uid,
@@ -154,7 +151,7 @@ export default function UploadPage() {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            
+
             {/* File */}
             <div>
               <label className="block text-xs font-medium text-slate-200 mb-1">

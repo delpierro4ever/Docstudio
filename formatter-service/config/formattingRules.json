@@ -1,0 +1,100 @@
+{
+  "defaultProfileId": "ub-v1",
+  "textProfiles": [
+    {
+      "id": "ub-v1",
+      "name": "University of Buea Standard",
+      "description": "Default formatting profile for UB final year reports",
+
+      "font": {
+        "family": "Times New Roman",
+        "size": 12
+      },
+
+      "paragraph": {
+        "justify": true,
+        "lineSpacing": 1.5,
+        "spaceBefore": 0,
+        "spaceAfter": 0,
+        "firstLineIndentCm": 0.0
+      },
+
+      "margins": {
+        "topCm": 2.5,
+        "bottomCm": 2.5,
+        "leftCm": 3.0,
+        "rightCm": 2.5
+      },
+
+      "headings": {
+        "chapterHeading": {
+          "detectPattern": "CHAPTER",
+          "styleName": "Heading 1",
+          "allCaps": true,
+          "bold": true,
+          "fontSize": 14,
+          "alignment": "center",
+          "spacingBefore": 24,
+          "spacingAfter": 12
+        },
+        "subHeading1": {
+          "styleName": "Heading 2",
+          "bold": true,
+          "fontSize": 12,
+          "alignment": "left",
+          "spacingBefore": 12,
+          "spacingAfter": 6
+        },
+        "subHeading2": {
+          "styleName": "Heading 3",
+          "bold": false,
+          "fontSize": 12,
+          "italics": true,
+          "alignment": "left",
+          "spacingBefore": 6,
+          "spacingAfter": 3
+        }
+      },
+
+      "sections": {
+        "preliminaries": {
+          "pageNumbers": "roman",
+          "startsAtFirstPage": true,
+          "endsBeforeFirstChapterHeading": true
+        },
+        "main": {
+          "pageNumbers": "arabic",
+          "restartAt": 1,
+          "startsAtFirstChapterHeading": true
+        }
+      },
+
+      "structure": {
+        "order": [
+          "titlePage",
+          "dedication",
+          "acknowledgement",
+          "abstract",
+          "tableOfContents",
+          "listOfTables",
+          "listOfFigures",
+          "abbreviations",
+          "chapters",
+          "references",
+          "appendices"
+        ],
+        "references": {
+          "titleText": "REFERENCES",
+          "onNewPage": true,
+          "alignment": "left",
+          "hangingIndentCm": 1.0
+        }
+      },
+
+      "toc": {
+        "autoInsert": true,
+        "includeHeadingLevels": [1, 2, 3]
+      }
+    }
+  ]
+}

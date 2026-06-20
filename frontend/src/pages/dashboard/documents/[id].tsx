@@ -33,17 +33,14 @@ export default function DocumentViewerPage() {
   const [downloading, setDownloading] = useState(false);
   const [zoom, setZoom] = useState(1); // 1 = 100%
   const [reformatting, setReformatting] = useState(false);
-const [info, setInfo] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   // Load job details
   useEffect(() => {
     if (!id) return;
 
     const uid = getUserId();
-    if (!uid) {
-      router.push("/login");
-      return;
-    }
+    // Login check disabled
 
     async function loadJob(userId: string, jobId: string) {
       try {
@@ -65,17 +62,63 @@ const [info, setInfo] = useState<string | null>(null);
     }
 
     const idString = Array.isArray(id) ? id[0] : (id as string);
-    loadJob(uid, idString);
+    loadJob(uid || "", idString);
   }, [id, router]);
+
+  // Poll for status updates when processing
+  useEffect(() => {
+    if (!id || !job) return;
+
+    // Only poll if status is "processing"
+    if (job.status !== "processing") return;
+
+    const uid = getUserId();
+    // Login check disabled
+
+    const idString = Array.isArray(id) ? id[0] : (id as string);
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const data = await apiRequest<JobDetail>(`/documents/${idString}`, {
+          headers: { "x-user-id": uid || "" }, // Fix type error
+        });
+
+        setJob(data);
+
+        // Stop polling if status changed from processing
+        if (data.status !== "processing") {
+          clearInterval(pollInterval);
+
+          // Reload preview when done
+          if (data.status === "done") {
+            try {
+              const res = await apiRequest<{ previewHtml: string | null }>(
+                `/documents/${idString}/preview`,
+                {
+                  headers: { "x-user-id": uid || "" },
+                }
+              );
+              setPreviewHtml(res.previewHtml ?? null);
+            } catch (err) {
+              console.error("Failed to reload preview:", err);
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+        // Don't stop polling on error, might be transient
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [id, job?.status]);
 
   // Load HTML preview
   useEffect(() => {
     if (!id) return;
 
     const uid = getUserId();
-    if (!uid) {
-      return; // job effect will redirect if needed
-    }
+    // Login check disabled
 
     async function loadPreview(userId: string, jobId: string) {
       try {
@@ -98,7 +141,7 @@ const [info, setInfo] = useState<string | null>(null);
     }
 
     const idString = Array.isArray(id) ? id[0] : (id as string);
-    loadPreview(uid, idString);
+    loadPreview(uid || "", idString);
   }, [id]);
 
   function formatDate(iso: string): string {
@@ -126,93 +169,73 @@ const [info, setInfo] = useState<string | null>(null);
     if (!job) return;
 
     const uid = getUserId();
-    if (!uid) {
-      router.push("/login");
-      return;
-    }
+    // Login check disabled
 
+    // Direct link to avoid Blob memory issues and browser interruptions
     try {
       setDownloading(true);
       setError(null);
 
-      const res = await fetch(
-        `http://localhost:4000/documents/${job.id}/download`,
-        {
-          method: "GET",
-          headers: { "x-user-id": uid },
-        }
-      );
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("Download error:", text);
-        setError("Failed to download file.");
-        return;
-      }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const downloadUrl = `http://localhost:8000/documents/${job.id}/download`;
 
       const link = document.createElement("a");
-      link.href = url;
-      link.download = `${job.documentType}-${job.id}.docx`;
+      link.href = downloadUrl;
+      link.setAttribute("download", `${job.documentType}-${job.id}.docx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
 
-      URL.revokeObjectURL(url);
+      // Hand off to browser download manager
     } catch (err) {
       console.error(err);
       setError("Failed to download file.");
     } finally {
-      setDownloading(false);
+      // Small delay to reset UI state
+      setTimeout(() => setDownloading(false), 1000);
     }
   }
 
 
   async function handleReformat() {
-  if (!job) return;
+    if (!job) return;
 
-  const uid = getUserId();
-  if (!uid) {
-    router.push("/login");
-    return;
-  }
+    const uid = getUserId();
+    // Login check disabled
 
-  try {
-    setReformatting(true);
-    setError(null);
-    setInfo(null);
+    try {
+      setReformatting(true);
+      setError(null);
+      setInfo(null);
 
-    const res = await fetch(
-      `http://localhost:4000/documents/${job.id}/reformat`,
-      {
-        method: "POST",
-        headers: {
-          "x-user-id": uid,
-        },
+      const res = await fetch(
+        `http://localhost:8000/documents/${job.id}/reformat`,
+        {
+          method: "POST",
+          headers: {
+            "x-user-id": uid || "", // Fix type error
+          },
+        }
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Reformat error:", text);
+        setError("Failed to reformat document.");
+        return;
       }
-    );
 
-    if (!res.ok) {
-      const text = await res.text();
-      console.error("Reformat error:", text);
+      const data = await res.json();
+
+      // Update job state (status, updatedAt, etc.)
+      setJob(data.job);
+      setInfo("Document reformatted successfully. You can download the latest version.");
+    } catch (err) {
+      console.error(err);
       setError("Failed to reformat document.");
-      return;
+    } finally {
+      setReformatting(false);
     }
-
-    const data = await res.json();
-
-    // Update job state (status, updatedAt, etc.)
-    setJob(data.job);
-    setInfo("Document reformatted successfully. You can download the latest version.");
-  } catch (err) {
-    console.error(err);
-    setError("Failed to reformat document.");
-  } finally {
-    setReformatting(false);
   }
-}
 
 
   if (loadingJob) {
@@ -330,22 +353,22 @@ const [info, setInfo] = useState<string | null>(null);
                     Go to dashboard
                   </button>
                   <button
-  onClick={handleReformat}
-  disabled={reformatting}
-  className="w-full border border-slate-600 bg-slate-900/60 text-slate-100 rounded-md px-3 py-1.5 text-xs hover:bg-slate-800/80 disabled:opacity-60"
->
-  {reformatting ? "Reformatting…" : "Re-run formatting"}
-</button>
+                    onClick={handleReformat}
+                    disabled={reformatting}
+                    className="w-full border border-slate-600 bg-slate-900/60 text-slate-100 rounded-md px-3 py-1.5 text-xs hover:bg-slate-800/80 disabled:opacity-60"
+                  >
+                    {reformatting ? "Reformatting…" : "Re-run formatting"}
+                  </button>
 
                 </div>
               </div>
 
               {info && (
-  <p className="text-xs text-emerald-300 mt-2">{info}</p>
-)}
-{error && (
-  <p className="text-xs text-red-400 mt-1">{error}</p>
-)}
+                <p className="text-xs text-emerald-300 mt-2">{info}</p>
+              )}
+              {error && (
+                <p className="text-xs text-red-400 mt-1">{error}</p>
+              )}
 
             </div>
 
@@ -394,14 +417,14 @@ const [info, setInfo] = useState<string | null>(null);
                 <div className="flex justify-center">
                   {/* Simulated A4 page */}
                   <div
-                     className="bg-white text-black rounded-md shadow-lg px-10 py-8"
-  style={{
-    width: "800px",
-    minHeight: "1130px",          // 👈 A4-like height at this width
-    // or `height: "1130px"` if you want strictly fixed height
-    transform: `scale(${zoom})`,
-    transformOrigin: "top center",
-  }}
+                    className="bg-white text-black rounded-md shadow-lg px-10 py-8"
+                    style={{
+                      width: "800px",
+                      minHeight: "1130px",          // 👈 A4-like height at this width
+                      // or `height: "1130px"` if you want strictly fixed height
+                      transform: `scale(${zoom})`,
+                      transformOrigin: "top center",
+                    }}
                   >
                     {previewLoading ? (
                       <p className="text-slate-500 text-sm">

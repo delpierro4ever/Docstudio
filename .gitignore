@@ -1,0 +1,60 @@
+# Dependency directories
+node_modules/
+/jspm_packages/
+/web_modules/
+
+# Next.js build outputs
+.next/
+out/
+build/
+dist/
+
+# Python cache and environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Local uploads and outputs (Runtime generated files)
+uploads/
+**/uploads/*
+!**/uploads/.gitkeep
+outputs/
+**/outputs/*
+!**/outputs/.gitkeep
+backend/uploads/
+formatter-service/uploads/
+formatter-service/outputs/
+
+# Python backend temp outputs
+python_backend/storage/
+python_backend/downloaded_*.docx
+python_backend/synthetic_*.docx
+python_backend/test_output_*.docx
+python_backend/test_output*.docx
+python_backend/test_upload.docx
+python_backend/*.txt
+python_backend/*.json
+
+# Backups, examples, and loose binaries
+formatter-service-old/
+examples/
+*.docx
+*.pdf
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

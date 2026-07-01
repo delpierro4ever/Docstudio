@@ -1,4 +1,8 @@
-const API_BASE = "http://localhost:8000";
+// The Express gateway (backend/, port 4000) is the single entry point for
+// the frontend; it proxies formatting work to the Python formatter-service
+// on :8082. (:8000 was the dead python_backend prototype nothing serves.)
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4000";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 

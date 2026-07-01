@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { apiRequest } from "@/lib/api";
+import { API_BASE, apiRequest } from "@/lib/api";
 import { getUserId } from "@/lib/auth";
 import Link from "next/link";
 
@@ -60,7 +60,7 @@ export default function DocumentsPage() {
       setDownloadingId(jobId);
       setError("");
 
-      const downloadUrl = `http://localhost:8000/documents/${jobId}/download`;
+      const downloadUrl = `${API_BASE}/documents/${jobId}/download`;
 
       const link = document.createElement("a");
       link.href = downloadUrl;

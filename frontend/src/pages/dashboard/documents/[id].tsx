@@ -1,6 +1,6 @@
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { API_BASE, apiRequest } from "@/lib/api";
 import { getUserId } from "@/lib/auth";
 
 interface JobDetail {
@@ -176,7 +176,7 @@ export default function DocumentViewerPage() {
       setDownloading(true);
       setError(null);
 
-      const downloadUrl = `http://localhost:8000/documents/${job.id}/download`;
+      const downloadUrl = `${API_BASE}/documents/${job.id}/download`;
 
       const link = document.createElement("a");
       link.href = downloadUrl;
@@ -208,7 +208,7 @@ export default function DocumentViewerPage() {
       setInfo(null);
 
       const res = await fetch(
-        `http://localhost:8000/documents/${job.id}/reformat`,
+        `${API_BASE}/documents/${job.id}/reformat`,
         {
           method: "POST",
           headers: {

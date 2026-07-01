@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getUserId } from "@/lib/auth";
+import { API_BASE } from "@/lib/api";
 
 interface TextProfile {
   id: string;
@@ -39,7 +40,7 @@ export default function UploadPage() {
     async function loadProfiles() {
       try {
         setLoadingProfiles(true);
-        const res = await fetch("http://localhost:8000/profiles");
+        const res = await fetch(`${API_BASE}/profiles`);
         const data = await res.json();
 
         setProfiles(data);
@@ -84,10 +85,10 @@ export default function UploadPage() {
       formData.append("documentType", documentType);
       formData.append("profileId", profileId);
 
-      const res = await fetch("http://localhost:8000/documents", {
+      const res = await fetch(`${API_BASE}/documents`, {
         method: "POST",
         headers: {
-          "x-user-id": uid,
+          "x-user-id": uid || "",
         },
         body: formData,
       });

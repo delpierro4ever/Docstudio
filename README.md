@@ -1,33 +1,67 @@
-# Student Report Formatter
+# DocStudio — Student Report Formatter
 
-Student Report Formatter is a tool that automatically formats student reports/theses
-according to predefined academic standards.
+DocStudio automatically reformats messy student reports/theses (.docx)
+to University of Buea academic standards.
 
-## Core Features (Target)
+## What it does
 
-- Upload a .docx report
-- Automatically:
-  - Separate preliminaries and main content
-  - Apply correct page numbering (Roman for prelims, Arabic for main body)
-  - Set fonts and spacing (e.g., Times New Roman, size 12, 1.5 spacing)
-  - Generate Table of Contents, List of Tables, List of Figures
-  - Place abbreviations and meanings in a clean table
-  - Format references in the chosen style
+- Upload a .docx report, get back a formatted .docx
+- Separates preliminaries and main content with a real section break
+  - Roman page numbers (i, ii, iii) for prelims, Arabic restarting at 1 for the main body
+- Applies fonts and spacing from a selectable profile:
+  - `ub-v1` — Times New Roman 12pt body, 1.5 spacing, 13pt subheadings (default)
+  - `ub-v2` — Times New Roman 14pt body, double spacing, 15pt subheadings
+- Generates **Table of Contents**, **List of Tables**, **List of Figures**
+  (real Word fields, results pre-baked via headless LibreOffice and set to
+  refresh on open in Word)
+- Rewrites table/figure captions with proper `SEQ` fields
+  (`Table 2.1: …`) so the lists stay correct when the document changes
+- Generates a **List of Abbreviations** (acronyms + detected expansions)
+- Optional LLM **grammar/spelling pass** over body paragraphs
+  (correction-only; never paraphrases)
+- Formats the references section with hanging indents
 
-## Modules
+## Architecture
 
-1. Project Foundations (Git, structure, docs)
-2. Formatting Rules Engine
-3. Document Ingestion (upload & type detection)
-4. Document Formatter Service (.docx in, .docx out)
-5. Web Interface (upload + download)
-6. User Accounts & Auth
-7. Usage Limits & Billing
-8. Admin & Analytics
-9. Deployment
+```
+frontend (Next.js, :3000)
+   → backend (Express gateway, :4000)      — auth, jobs, pricing, profiles
+       → formatter-service (FastAPI, :8082) — parse → LLM classify → format
+```
 
-## Tech Stack (Draft)
+`python_backend/` is a deprecated dead prototype — see its DEPRECATED.md.
 
-- Frontend: Next.js (React)
-- Backend: Node.js/TypeScript (or separate microservice if needed)
-- Storage: (TBD) – local in dev, cloud in production
+## Running locally
+
+```bash
+# formatter-service
+cd formatter-service
+virtualenv .venv && .venv/bin/pip install -r requirements.txt
+echo "OPENROUTER_API_KEY=sk-..." > .env      # needed for classification + grammar pass
+.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8082
+
+# backend gateway
+cd backend && npm install && npm run dev     # :4000
+
+# frontend
+cd frontend && npm install && npm run dev    # :3000 (set NEXT_PUBLIC_API_BASE to override :4000)
+```
+
+Optional formatter-service environment flags:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `DOCSTUDIO_BAKE_FIELDS` | `1` | Bake TOC/LOT/LOF/page-number field results via headless LibreOffice (needs `soffice` + a python with `uno`) |
+| `DOCSTUDIO_PROOFREAD` | `1` | LLM grammar/spelling pass over body paragraphs |
+| `LLM_MODEL` | `x-ai/grok-4.1-fast:free` | OpenRouter model for classification/proofreading |
+
+## Tests
+
+```bash
+cd formatter-service
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+The suite covers the whole formatting pipeline (fields, section breaks,
+page numbering, SEQ captions, abbreviations, profiles) without needing
+the LLM or LibreOffice.

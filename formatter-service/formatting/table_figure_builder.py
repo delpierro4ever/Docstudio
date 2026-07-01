@@ -1,34 +1,39 @@
 from typing import Dict, Any, List, Optional
-from docx import Document # <-- FIX: Added missing import for Document
+
+from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
-from docx.text.paragraph import Paragraph 
-from docx.enum.section import WD_SECTION 
+from docx.text.paragraph import Paragraph
 
 
-# --- HELPER FUNCTIONS FOR LIST INSERTION ---
+# ---------------------------------------------------------------------------
+# LOT / LOF insertion (generated prelim pages)
+# ---------------------------------------------------------------------------
 
 def _add_list_field(paragraph: Paragraph, caption_label: str) -> None:
     """
-    Inserts a functional List field (LOT/LOF) that Word can update.
+    Inserts a functional List field (LOT/LOF).
+
+    The field instruction `TOC \\c "<label>"` collects every caption built
+    with a `SEQ <label>` field (see write_caption_with_seq below) — which is
+    why captions must contain real SEQ fields for these lists to populate.
     """
-    # Clear paragraph completely and set alignment
     paragraph.clear()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
-    # 1) Begin field: <w:fldChar w:fldCharType="begin" w:dirty="true"/>
+    # 1) Begin field
     run = paragraph.add_run()
     fld_char_begin = OxmlElement("w:fldChar")
     fld_char_begin.set(qn("w:fldCharType"), "begin")
-    fld_char_begin.set(qn("w:dirty"), "true") # Signal for auto-refresh
+    fld_char_begin.set(qn("w:dirty"), "true")
     run._r.append(fld_char_begin)
 
-    # 2) Instruction text: <w:instrText xml:space="preserve"> TOC \h \z \c "CaptionLabel" </w:instrText>
+    # 2) Instruction text
     run = paragraph.add_run()
     instr_text = OxmlElement("w:instrText")
     instr_text.set(qn("xml:space"), "preserve")
-    # \c is the switch for "use TOC entries identified by the Sequence field (caption) name"
     instr_text.text = f' TOC \\h \\z \\c "{caption_label}" '
     run._r.append(instr_text)
 
@@ -38,9 +43,9 @@ def _add_list_field(paragraph: Paragraph, caption_label: str) -> None:
     fld_char_sep.set(qn("w:fldCharType"), "separate")
     run._r.append(fld_char_sep)
 
-    # 4) Placeholder result run
+    # 4) Placeholder result run (replaced when fields are updated)
     placeholder_run = paragraph.add_run()
-    placeholder_run.text = f"Updating list of {caption_label.lower()}..."
+    placeholder_run.text = "Right-click and choose 'Update Field' if this text is still visible."
     placeholder_run.italic = True
 
     # 5) End
@@ -51,136 +56,212 @@ def _add_list_field(paragraph: Paragraph, caption_label: str) -> None:
 
 
 def insert_list_of_entries(
-    doc: Document, 
-    metadata: Dict[str, Any], 
-    title: str, 
-    caption_label: str, 
+    doc: Document,
+    metadata: Dict[str, Any],
+    title: str,
+    caption_label: str,
     anchor_para: Optional[Paragraph] = None,
-    is_last_prelim_page: bool = False
 ) -> Optional[Paragraph]:
     """
-    Inserts a List of Tables/Figures title and field BEFORE the anchor_para.
-    A page break is inserted immediately before the title (or a section break if it's the last prelim item).
-    
-    Returns the inserted title paragraph (which acts as the new anchor).
+    Inserts a List of Tables/Figures title and field BEFORE the anchor_para,
+    preceded by a simple page break.
+
+    Section breaks are handled once by section_builder at the prelim/main
+    boundary. (The old add_break(WD_SECTION.NEXT_PAGE) call was invalid and
+    crashed the List of Figures on every run.)
+
+    Returns the topmost inserted paragraph (the new anchor for the next
+    prelim page inserted above this one).
     """
     title_style_name = metadata.get("toc", {}).get("titleStyleName", "Heading 1")
-    
-    # --- 1. NEW PAGE/SECTION BREAK ---
-    break_anchor = anchor_para
-    is_first_paragraph_in_doc = (break_anchor is not None and break_anchor == doc.paragraphs[0])
 
-    if break_anchor is not None and not is_first_paragraph_in_doc:
-        break_para = break_anchor.insert_paragraph_before()
-        
-        if is_last_prelim_page:
-            # Insert a paragraph with a NEXT_PAGE section break (separates Prelim from Main)
-            break_para.add_run().add_break(WD_SECTION.NEXT_PAGE)
-        else:
-            # Insert a simple page break to separate prelim pages (TOC, LOT, LOF)
-            break_para.add_run().add_break(WD_BREAK.PAGE)
-    
-    
-    # --- 2. INSERT LIST FIELD (just before the title) ---
+    # --- 1. PAGE BREAK ---
+    is_first_paragraph_in_doc = (
+        anchor_para is not None
+        and doc.paragraphs
+        and anchor_para._p is doc.paragraphs[0]._p
+    )
+
+    break_para = None
+    if anchor_para is not None and not is_first_paragraph_in_doc:
+        break_para = anchor_para.insert_paragraph_before()
+        break_para.add_run().add_break(WD_BREAK.PAGE)
+
+    # --- 2. INSERT LIST FIELD (just before the anchor) ---
     if anchor_para is not None:
         list_para = anchor_para.insert_paragraph_before()
     else:
         list_para = doc.add_paragraph()
-        
+
     _add_list_field(list_para, caption_label)
 
     # --- 3. INSERT TITLE (just before the field) ---
     title_para = list_para.insert_paragraph_before(title)
-    
-    # Apply style and alignment
+
     try:
         title_para.style = title_style_name
     except Exception:
         pass
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    print(f"[INFO] Inserted placeholder for {title}")
-    
-    return title_para
+    print(f"[INFO] Inserted {title} field")
+
+    # Topmost inserted paragraph = anchor for the next prelim page
+    return break_para if break_para is not None else title_para
 
 
-# --- MAIN ENTRY POINT (Updated to match the call in formatter.py) ---
+# ---------------------------------------------------------------------------
+# Caption normalization with SEQ fields
+# ---------------------------------------------------------------------------
 
-def _get_paragraph_by_block_id(doc: Document, blocks: List[Dict[str, Any]], block_id: str) -> Optional[Paragraph]:
+def _get_paragraph_by_block_id(
+    doc: Document,
+    blocks: List[Dict[str, Any]],
+    block_id: str,
+) -> Optional[Paragraph]:
     """
-    Helper to get a Paragraph object by its block ID.
+    Map a P# block id to the corresponding paragraph by walking the block
+    list in order (paragraph-type blocks map 1:1 onto doc.paragraphs).
+
+    The old implementation did doc.paragraphs[int(block_id[1:])], which was
+    off by one (P# is 1-based) and ignored the block/paragraph mapping
+    entirely, so captions were never found.
     """
-    # Simple placeholder logic
+    para_index = -1
+    for block in blocks:
+        if block.get("type") != "paragraph":
+            continue
+        para_index += 1
+        if block.get("id") == block_id:
+            if 0 <= para_index < len(doc.paragraphs):
+                return doc.paragraphs[para_index]
+            return None
+    return None
+
+
+def _ensure_caption_style(doc: Document) -> None:
+    """Make sure the built-in 'Caption' style exists in this document."""
     try:
-        para_index = block_id.split('P')[-1] 
-        return doc.paragraphs[int(para_index)]
-    except:
-        return None
+        doc.styles["Caption"]
+    except KeyError:
+        style = doc.styles.add_style("Caption", WD_STYLE_TYPE.PARAGRAPH)
+        try:
+            style.base_style = doc.styles["Normal"]
+        except KeyError:
+            pass
 
-def _reformat_caption_paragraph(
+
+def _append_seq_field(paragraph: Paragraph, label: str, cached_number: str) -> None:
+    """
+    Append a `{ SEQ <label> \\* ARABIC \\s 1 }` field to the paragraph.
+
+    The `\\s 1` switch restarts numbering after each Heading 1 (chapter),
+    which yields the per-chapter index used in "Table 2.3". The cached
+    result we write is the number we computed ourselves, so the caption
+    looks right even before fields are refreshed.
+    """
+    run = paragraph.add_run()
+    fld_begin = OxmlElement("w:fldChar")
+    fld_begin.set(qn("w:fldCharType"), "begin")
+    run._r.append(fld_begin)
+
+    run = paragraph.add_run()
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = f" SEQ {label} \\* ARABIC \\s 1 "
+    run._r.append(instr)
+
+    run = paragraph.add_run()
+    fld_sep = OxmlElement("w:fldChar")
+    fld_sep.set(qn("w:fldCharType"), "separate")
+    run._r.append(fld_sep)
+
+    paragraph.add_run(cached_number)
+
+    run = paragraph.add_run()
+    fld_end = OxmlElement("w:fldChar")
+    fld_end.set(qn("w:fldCharType"), "end")
+    run._r.append(fld_end)
+
+
+def write_caption_with_seq(
     paragraph: Paragraph,
-    role: str,
-    number: str,
-    caption: str,
+    label: str,
+    chapter: Optional[int],
+    index_in_chapter: int,
+    caption_text: str,
     profile: Dict[str, Any],
+    role: str,
 ) -> None:
     """
-    Rewrites the caption paragraph text and applies the required style.
-    """
-    
-    # 1. Construct the new, normalized caption text
-    normalized_text = f"{number}: {caption}"
-    
-    # 2. Apply the text to the paragraph
-    paragraph.clear()
-    run = paragraph.add_run(normalized_text)
+    Rewrite a caption paragraph as e.g.:
 
-    # 3. Apply basic caption styling (should come from a dedicated 'caption' profile config)
-    caption_cfg = profile.get("captions", {})
+        Table 2.{SEQ Table \\s 1 -> 3}: Distribution of respondents
+
+    The literal chapter prefix comes from LLM metadata; the item number is
+    a real SEQ field so Word keeps it correct and LOT/LOF can collect it.
+    """
+    paragraph.clear()
+
+    prefix = f"{label} "
+    if chapter is not None:
+        prefix += f"{chapter}."
+
+    paragraph.add_run(prefix)
+    _append_seq_field(paragraph, label, str(index_in_chapter))
+    paragraph.add_run(f": {caption_text}")
+
+    # Style + alignment from profile
+    caption_cfg = profile.get("captions", {}) or {}
     if role == "table":
         style_name = caption_cfg.get("tableStyleName", "Caption")
-        alignment = WD_ALIGN_PARAGRAPH.CENTER
         bold = caption_cfg.get("tableBold", True)
-        
-    elif role == "figure":
-        style_name = caption_cfg.get("figureStyleName", "Caption")
-        alignment = WD_ALIGN_PARAGRAPH.CENTER
-        bold = caption_cfg.get("figureBold", False)
-        
     else:
-        style_name = "Caption"
-        alignment = WD_ALIGN_PARAGRAPH.LEFT
-        bold = False
+        style_name = caption_cfg.get("figureStyleName", "Caption")
+        bold = caption_cfg.get("figureBold", False)
 
-
-    # Apply style and formatting
     try:
         paragraph.style = style_name
     except KeyError:
-        pass 
+        pass
 
-    paragraph.alignment = alignment
-    run.bold = bold
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for run in paragraph.runs:
+        run.bold = bold
 
 
 def apply_tables_and_figures(
     doc: Document,
     blocks: List[Dict[str, Any]],
     metadata: Dict[str, Any],
-    profile: Dict[str, Any], 
+    profile: Dict[str, Any],
 ) -> None:
     """
     Normalize table and figure numbering & captions using LLM metadata,
-    AND reformat the actual caption paragraphs in the DOCX.
+    rewriting each caption paragraph with a SEQ field so that:
+      - numbering stays consistent ("Table 1.1", "Figure 2.3", ...)
+      - the LIST OF TABLES / LIST OF FIGURES fields can populate.
+
+    MUST run before any prelim pages are inserted, while the block list
+    still lines up 1:1 with doc.paragraphs.
     """
     if "blocks" not in metadata:
         return
+
+    _ensure_caption_style(doc)
 
     block_meta: Dict[str, Any] = metadata["blocks"]
     table_counters: Dict[int, int] = {}
     figure_counters: Dict[int, int] = {}
 
-    for block_id, info in block_meta.items():
+    # Walk blocks in DOCUMENT ORDER so numbering follows reading order
+    # (dict iteration order of LLM output is not guaranteed to match).
+    for block in blocks:
+        block_id = block.get("id")
+        info = block_meta.get(block_id)
+        if not info:
+            continue
+
         role = info.get("role")
         if role not in ("table", "figure"):
             continue
@@ -190,76 +271,52 @@ def apply_tables_and_figures(
             chapter = 1
             info["chapter"] = chapter
 
-        if role == "table" and chapter not in table_counters:
-            table_counters[chapter] = 0
-        if role == "figure" and chapter not in figure_counters:
-            figure_counters[chapter] = 0
+        counters = table_counters if role == "table" else figure_counters
+        counters[chapter] = counters.get(chapter, 0) + 1
+        index_in_chapter = counters[chapter]
 
-    for block_id, info in block_meta.items():
-        role = info.get("role")
-        if role == "table":
-            _ensure_table_metadata(block_id, info, table_counters)
-        elif role == "figure":
-            _ensure_figure_metadata(block_id, info, figure_counters)
-            
-    for block_id, info in block_meta.items():
-        role = info.get("role")
-        
+        label = "Table" if role == "table" else "Figure"
+
+        caption_text = info.get("caption") or info.get("rawCaption") or info.get("title") or ""
+        if not caption_text:
+            caption_text = "Untitled"
+
         caption_block_id = info.get("caption_block_id")
-        
-        if role in ("table", "figure") and caption_block_id:
-            caption_para = _get_paragraph_by_block_id(doc, blocks, caption_block_id)
-            
-            if caption_para:
-                number_key = "tableNumber" if role == "table" else "figureNumber"
-                number = info.get(number_key, "N/A")
-                caption = info.get("caption", "Missing Caption")
-                
-                _reformat_caption_paragraph(
-                    caption_para, 
-                    role, 
-                    number, 
-                    caption, 
-                    profile
-                )
-    
-def _ensure_table_metadata(
-    block_id: str,
-    info: Dict[str, Any],
-    table_counters: Dict[int, int],
-) -> None:
-    
-    chapter = info.get("chapter", 1)
-    table_counters[chapter] = table_counters.get(chapter, 0) + 1
-    index_in_chapter = table_counters[chapter]
+        if not caption_block_id:
+            continue
 
-    if not info.get("tableNumber"):
-        info["tableNumber"] = f"Table {chapter}.{index_in_chapter}"
+        caption_para = _get_paragraph_by_block_id(doc, blocks, caption_block_id)
+        if caption_para is None:
+            print(f"[WARN] Caption paragraph {caption_block_id} for {block_id} not found")
+            continue
 
-    if "caption" not in info or not info["caption"]:
-        raw_caption = info.get("rawCaption") or info.get("title") or ""
-        if raw_caption:
-            info["caption"] = raw_caption
-        else:
-            info["caption"] = f"{info['tableNumber']} caption"
+        # Strip any pre-existing "Table 1:" prefix from the caption text
+        stripped = _strip_existing_number_prefix(caption_text, label)
+
+        write_caption_with_seq(
+            caption_para,
+            label=label,
+            chapter=chapter,
+            index_in_chapter=index_in_chapter,
+            caption_text=stripped,
+            profile=profile,
+            role=role,
+        )
+
+        # Record the normalized number back into metadata for downstream use
+        number_key = "tableNumber" if role == "table" else "figureNumber"
+        info[number_key] = f"{label} {chapter}.{index_in_chapter}"
+
+    print(f"[INFO] Rewrote captions with SEQ fields "
+          f"(tables: {sum(table_counters.values())}, figures: {sum(figure_counters.values())})")
 
 
-def _ensure_figure_metadata(
-    block_id: str,
-    info: Dict[str, Any],
-    figure_counters: Dict[int, int],
-) -> None:
-    
-    chapter = info.get("chapter", 1)
-    figure_counters[chapter] = figure_counters.get(chapter, 0) + 1
-    index_in_chapter = figure_counters[chapter]
+def _strip_existing_number_prefix(caption_text: str, label: str) -> str:
+    """
+    Remove leading 'Table 3.1:' / 'Figure 2 -' style prefixes so we don't
+    end up with 'Table 1.1: Table 3.1: ...' after normalization.
+    """
+    import re
 
-    if not info.get("figureNumber"):
-        info["figureNumber"] = f"Figure {chapter}.{index_in_chapter}"
-
-    if "caption" not in info or not info["caption"]:
-        raw_caption = info.get("rawCaption") or info.get("title") or ""
-        if raw_caption:
-            info["caption"] = raw_caption
-        else:
-            info["caption"] = f"{info['figureNumber']} caption"
+    pattern = rf"^\s*{label}\s*[\dIVXivx]+([.\-]\d+)*\s*[:.\-–]?\s*"
+    return re.sub(pattern, "", caption_text, flags=re.IGNORECASE).strip() or caption_text.strip()

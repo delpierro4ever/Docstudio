@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Cm
+from docx.shared import Cm, Pt
 
 
 def format_references_section(
@@ -109,11 +109,12 @@ def _style_references_heading(para, title_text: str) -> None:
     # Center alignment
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Spacing (values are in twips: 20 * points)
     pf = para.paragraph_format
-    # Using 12pt before/6pt after is a reasonable default
-    pf.space_before = 12 * 20
-    pf.space_after = 6 * 20
+    # 12pt before / 6pt after is a reasonable default.
+    # (The old code assigned raw ints, which python-docx reads as EMU —
+    # ~0.02pt — so the spacing was effectively zero.)
+    pf.space_before = Pt(12)
+    pf.space_after = Pt(6)
 
 
 def _apply_references_entry_formatting(

@@ -3,8 +3,8 @@
   "textProfiles": [
     {
       "id": "ub-v1",
-      "name": "University of Buea Standard",
-      "description": "Default formatting profile for UB final year reports",
+      "name": "University of Buea — 12pt / 1.5 spacing",
+      "description": "Standard UB profile: Times New Roman 12pt body, 1.5 line spacing, 13pt subheadings",
 
       "font": {
         "family": "Times New Roman",
@@ -40,7 +40,7 @@
         "subHeading1": {
           "styleName": "Heading 2",
           "bold": true,
-          "fontSize": 12,
+          "fontSize": 13,
           "alignment": "left",
           "spacingBefore": 12,
           "spacingAfter": 6
@@ -48,12 +48,137 @@
         "subHeading2": {
           "styleName": "Heading 3",
           "bold": false,
-          "fontSize": 12,
+          "fontSize": 13,
           "italics": true,
           "alignment": "left",
           "spacingBefore": 6,
           "spacingAfter": 3
         }
+      },
+
+      "captions": {
+        "tableStyleName": "Caption",
+        "tableBold": true,
+        "figureStyleName": "Caption",
+        "figureBold": false
+      },
+
+      "grammar": {
+        "enabled": true
+      },
+
+      "abbreviations": {
+        "autoGenerate": true
+      },
+
+      "sections": {
+        "preliminaries": {
+          "pageNumbers": "roman",
+          "startsAtFirstPage": true,
+          "endsBeforeFirstChapterHeading": true
+        },
+        "main": {
+          "pageNumbers": "arabic",
+          "restartAt": 1,
+          "startsAtFirstChapterHeading": true
+        }
+      },
+
+      "structure": {
+        "order": [
+          "titlePage",
+          "dedication",
+          "acknowledgement",
+          "abstract",
+          "tableOfContents",
+          "listOfTables",
+          "listOfFigures",
+          "abbreviations",
+          "chapters",
+          "references",
+          "appendices"
+        ],
+        "references": {
+          "titleText": "REFERENCES",
+          "onNewPage": true,
+          "alignment": "left",
+          "hangingIndentCm": 1.0
+        }
+      },
+
+      "toc": {
+        "autoInsert": true,
+        "includeHeadingLevels": [1, 2, 3]
+      }
+    },
+    {
+      "id": "ub-v2",
+      "name": "University of Buea — 14pt / double spacing",
+      "description": "Large-print UB profile: Times New Roman 14pt body, double line spacing, 15pt subheadings",
+
+      "font": {
+        "family": "Times New Roman",
+        "size": 14
+      },
+
+      "paragraph": {
+        "justify": true,
+        "lineSpacing": 2.0,
+        "spaceBefore": 0,
+        "spaceAfter": 0,
+        "firstLineIndentCm": 0.0
+      },
+
+      "margins": {
+        "topCm": 2.5,
+        "bottomCm": 2.5,
+        "leftCm": 3.0,
+        "rightCm": 2.5
+      },
+
+      "headings": {
+        "chapterHeading": {
+          "detectPattern": "CHAPTER",
+          "styleName": "Heading 1",
+          "allCaps": true,
+          "bold": true,
+          "fontSize": 16,
+          "alignment": "center",
+          "spacingBefore": 24,
+          "spacingAfter": 12
+        },
+        "subHeading1": {
+          "styleName": "Heading 2",
+          "bold": true,
+          "fontSize": 15,
+          "alignment": "left",
+          "spacingBefore": 12,
+          "spacingAfter": 6
+        },
+        "subHeading2": {
+          "styleName": "Heading 3",
+          "bold": false,
+          "fontSize": 15,
+          "italics": true,
+          "alignment": "left",
+          "spacingBefore": 6,
+          "spacingAfter": 3
+        }
+      },
+
+      "captions": {
+        "tableStyleName": "Caption",
+        "tableBold": true,
+        "figureStyleName": "Caption",
+        "figureBold": false
+      },
+
+      "grammar": {
+        "enabled": true
+      },
+
+      "abbreviations": {
+        "autoGenerate": true
       },
 
       "sections": {

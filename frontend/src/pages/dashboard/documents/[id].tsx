@@ -169,28 +169,39 @@ export default function DocumentViewerPage() {
     if (!job) return;
 
     const uid = getUserId();
-    // Login check disabled
+    if (!uid) {
+      router.push("/login");
+      return;
+    }
 
-    // Direct link to avoid Blob memory issues and browser interruptions
     try {
       setDownloading(true);
       setError(null);
 
-      const downloadUrl = `${API_BASE}/documents/${job.id}/download`;
+      const res = await fetch(`${API_BASE}/documents/${job.id}/download`, {
+        headers: { "x-user-id": uid },
+      });
 
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Download error:", text);
+        setError("Failed to download file.");
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = downloadUrl;
+      link.href = url;
       link.setAttribute("download", `${job.documentType}-${job.id}.docx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
-
-      // Hand off to browser download manager
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
       setError("Failed to download file.");
     } finally {
-      // Small delay to reset UI state
       setTimeout(() => setDownloading(false), 1000);
     }
   }

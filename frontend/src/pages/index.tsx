@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 import { useRouter } from "next/router";
+import { getUserId } from "@/lib/auth";
 
 export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    router.push("/upload");
+    const uid = getUserId();
+    router.push(uid ? "/dashboard" : "/login");
   }, [router]);
 
   return (

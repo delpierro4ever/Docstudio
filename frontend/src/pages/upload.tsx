@@ -35,6 +35,11 @@ export default function UploadPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Auth guard
+  useEffect(() => {
+    if (!getUserId()) router.push("/login");
+  }, [router]);
+
   // Load profiles from backend
   useEffect(() => {
     async function loadProfiles() {
@@ -66,7 +71,10 @@ export default function UploadPage() {
     setError(null);
 
     const uid = getUserId();
-    // Login check temporarily disabled for testing
+    if (!uid) {
+      router.push("/login");
+      return;
+    }
 
     if (!file) {
       setError("Please select a .docx file.");

@@ -17,23 +17,38 @@ interface MeResponse {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const [user, setUser] = useState<MeResponse | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Mock user data for testing without authentication
-  const user: MeResponse = {
-    id: "test-user-123",
-    fullName: "Test User",
-    email: "test@docstudio.com",
-    phone: "",
-    role: "individual",
-    centerId: null,
-    freeRemaining: 5,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
+  useEffect(() => {
+    const uid = getUserId();
+    if (!uid) {
+      router.push("/login");
+      return;
+    }
+
+    apiRequest<MeResponse>("/auth/me", {
+      headers: { "x-user-id": uid },
+    })
+      .then(setUser)
+      .catch(() => {
+        logout();
+        router.push("/login");
+      })
+      .finally(() => setLoading(false));
+  }, [router]);
 
   function handleLogout() {
-    // Logout disabled for testing
-    console.log("Logout clicked (disabled for testing)");
+    logout();
+    router.push("/login");
+  }
+
+  if (loading || !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
+        <p>Loading...</p>
+      </div>
+    );
   }
 
   const isCenterAdmin = user.role === "center-admin";
@@ -161,7 +176,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-sm font-semibold mb-1">My Documents</p>
                 <p className="text-xs text-slate-200/80">
-                  View all the documents you’ve formatted and download the
+                  View all the documents you've formatted and download the
                   final versions ready for printing.
                 </p>
               </div>

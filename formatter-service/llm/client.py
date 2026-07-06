@@ -38,8 +38,8 @@ class LLMClassifier:
         # Fallback models (optional; you can tweak this list)
         self.models_to_try: List[str] = [
             primary_model,
-            "google/gemini-3-pro-preview",
-            "kwaipilot/kat-coder-pro:free",
+            "openai/gpt-4o-mini",
+            "openai/gpt-4.1-nano",
         ]
 
         self.prompt_builder = LLMPromptBuilder()

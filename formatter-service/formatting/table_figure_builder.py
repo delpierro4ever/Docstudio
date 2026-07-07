@@ -230,6 +230,80 @@ def write_caption_with_seq(
         run.bold = bold
 
 
+def _build_para_map(doc: Document, blocks: List[Dict[str, Any]]) -> dict:
+    """Map P# block IDs -> Paragraph objects using the same index walk as _get_paragraph_by_block_id."""
+    result = {}
+    para_index = -1
+    for block in blocks:
+        if block.get("type") != "paragraph":
+            continue
+        para_index += 1
+        if 0 <= para_index < len(doc.paragraphs):
+            result[block["id"]] = doc.paragraphs[para_index]
+    return result
+
+
+def _build_table_el_map(doc: Document, blocks: List[Dict[str, Any]]) -> dict:
+    """Map T# block IDs -> <w:tbl> XML elements in body order."""
+    tbl_elements = [el for el in doc.element.body if el.tag == qn("w:tbl")]
+    result = {}
+    t_idx = 0
+    for block in blocks:
+        if block.get("type") == "table":
+            if t_idx < len(tbl_elements):
+                result[block["id"]] = tbl_elements[t_idx]
+            t_idx += 1
+    return result
+
+
+def _reposition(body, caption_el, anchor_el, position: str) -> None:
+    """
+    Move caption_el to be immediately before/after anchor_el — but only if
+    it is currently on the wrong side. Uses lxml addprevious/addnext which
+    automatically detaches the element from its current position.
+    """
+    body_list = list(body)
+    try:
+        cap_idx = body_list.index(caption_el)
+        anc_idx = body_list.index(anchor_el)
+    except ValueError:
+        return  # element not a direct body child (e.g. inside a table cell)
+
+    if position == "before" and cap_idx > anc_idx:
+        anchor_el.addprevious(caption_el)
+    elif position == "after" and cap_idx < anc_idx:
+        anchor_el.addnext(caption_el)
+
+
+def _insert_figure_caption(
+    doc: Document,
+    image_para_el,
+    label: str,
+    chapter: int,
+    index_in_chapter: int,
+    caption_text: str,
+    profile: Dict[str, Any],
+) -> None:
+    """
+    Create a new caption paragraph immediately after image_para_el.
+    Uses doc.add_paragraph() so the paragraph has a proper parent and
+    style access, then moves the underlying XML element into position.
+    """
+    new_para = doc.add_paragraph()          # appended at end; proper parent set
+    write_caption_with_seq(
+        new_para,
+        label=label,
+        chapter=chapter,
+        index_in_chapter=index_in_chapter,
+        caption_text=caption_text,
+        profile=profile,
+        role="figure",
+    )
+    # Move XML element to sit right after the image paragraph
+    image_para_el.addnext(new_para._p)
+    print(f"[INFO] Created figure caption: {label} {chapter}.{index_in_chapter}")
+
+
 def apply_tables_and_figures(
     doc: Document,
     blocks: List[Dict[str, Any]],
@@ -237,13 +311,14 @@ def apply_tables_and_figures(
     profile: Dict[str, Any],
 ) -> None:
     """
-    Normalize table and figure numbering & captions using LLM metadata,
-    rewriting each caption paragraph with a SEQ field so that:
-      - numbering stays consistent ("Table 1.1", "Figure 2.3", ...)
-      - the LIST OF TABLES / LIST OF FIGURES fields can populate.
+    Normalize table and figure numbering & captions using LLM metadata.
 
-    MUST run before any prelim pages are inserted, while the block list
-    still lines up 1:1 with doc.paragraphs.
+    Tables  → caption is placed ABOVE the table.
+    Figures → caption is placed BELOW the image paragraph.
+              If no caption exists in the original document, one is created.
+
+    MUST run before any prelim pages are inserted (block↔paragraph indices
+    are only valid while the document structure is unchanged).
     """
     if "blocks" not in metadata:
         return
@@ -254,8 +329,15 @@ def apply_tables_and_figures(
     table_counters: Dict[int, int] = {}
     figure_counters: Dict[int, int] = {}
 
-    # Walk blocks in DOCUMENT ORDER so numbering follows reading order
-    # (dict iteration order of LLM output is not guaranteed to match).
+    # Pre-build lookup maps once (avoids O(n²) walks per caption)
+    para_map = _build_para_map(doc, blocks)
+    table_el_map = _build_table_el_map(doc, blocks)
+
+    # Collect position fixes to apply after all SEQ rewrites are done,
+    # so the para_map indices stay valid throughout the rewrite phase.
+    position_fixes: list = []          # (caption_el, anchor_el, "before"/"after")
+    new_figure_captions: list = []     # figures with no existing caption paragraph
+
     for block in blocks:
         block_id = block.get("id")
         info = block_meta.get(block_id)
@@ -266,32 +348,35 @@ def apply_tables_and_figures(
         if role not in ("table", "figure"):
             continue
 
-        chapter = info.get("chapter")
-        if chapter is None:
-            chapter = 1
-            info["chapter"] = chapter
+        chapter = info.get("chapter") or 1
+        info["chapter"] = chapter
 
         counters = table_counters if role == "table" else figure_counters
         counters[chapter] = counters.get(chapter, 0) + 1
         index_in_chapter = counters[chapter]
 
         label = "Table" if role == "table" else "Figure"
-
-        caption_text = info.get("caption") or info.get("rawCaption") or info.get("title") or ""
-        if not caption_text:
-            caption_text = "Untitled"
+        caption_text = (info.get("caption") or info.get("rawCaption") or info.get("title") or "Untitled")
+        stripped = _strip_existing_number_prefix(caption_text, label)
 
         caption_block_id = info.get("caption_block_id")
+
         if not caption_block_id:
+            if role == "figure":
+                # No caption in the original doc — create one below the image
+                parent_id = block.get("parent")
+                parent_para = para_map.get(parent_id)
+                if parent_para is not None:
+                    new_figure_captions.append(
+                        (parent_para._p, label, chapter, index_in_chapter, stripped, profile)
+                    )
+            # Tables without a caption block are left as-is
             continue
 
-        caption_para = _get_paragraph_by_block_id(doc, blocks, caption_block_id)
+        caption_para = para_map.get(caption_block_id)
         if caption_para is None:
             print(f"[WARN] Caption paragraph {caption_block_id} for {block_id} not found")
             continue
-
-        # Strip any pre-existing "Table 1:" prefix from the caption text
-        stripped = _strip_existing_number_prefix(caption_text, label)
 
         write_caption_with_seq(
             caption_para,
@@ -303,12 +388,35 @@ def apply_tables_and_figures(
             role=role,
         )
 
-        # Record the normalized number back into metadata for downstream use
         number_key = "tableNumber" if role == "table" else "figureNumber"
         info[number_key] = f"{label} {chapter}.{index_in_chapter}"
 
-    print(f"[INFO] Rewrote captions with SEQ fields "
-          f"(tables: {sum(table_counters.values())}, figures: {sum(figure_counters.values())})")
+        # Schedule the position fix
+        if role == "table":
+            table_el = table_el_map.get(block_id)
+            if table_el is not None:
+                # Caption must end up ABOVE the table
+                position_fixes.append((caption_para._p, table_el, "before"))
+        elif role == "figure":
+            parent_id = block.get("parent")
+            parent_para = para_map.get(parent_id)
+            if parent_para is not None:
+                # Caption must end up BELOW the image paragraph
+                position_fixes.append((caption_para._p, parent_para._p, "after"))
+
+    # Phase 2: move captions to correct positions
+    body = doc.element.body
+    for caption_el, anchor_el, pos in position_fixes:
+        _reposition(body, caption_el, anchor_el, pos)
+
+    # Phase 3: insert brand-new captions for uncaptioned figures
+    for args in new_figure_captions:
+        _insert_figure_caption(doc, *args)
+
+    print(
+        f"[INFO] Rewrote captions with SEQ fields "
+        f"(tables: {sum(table_counters.values())}, figures: {sum(figure_counters.values())})"
+    )
 
 
 def _strip_existing_number_prefix(caption_text: str, label: str) -> str:

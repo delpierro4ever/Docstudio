@@ -84,6 +84,7 @@ class DOCXBlockParser:
         for img in image_blocks:
             self.block_counter["F"] += 1
             img["id"] = f"F{self.block_counter['F']}"
+            img["caption_guess"] = self._guess_image_caption(element)
             self.blocks.append(img)
 
     def _extract_table(self, element) -> None:
@@ -131,6 +132,20 @@ class DOCXBlockParser:
 
         return None
 
+    def _guess_image_caption(self, image_para_element) -> str | None:
+        """Look at the next (and previous) sibling paragraph for a figure caption."""
+        next_el = image_para_element.getnext()
+        if next_el is not None and next_el.tag == qn("w:p"):
+            text = Paragraph(next_el, None).text.strip()
+            if self._looks_like_caption(text):
+                return text
+        prev_el = image_para_element.getprevious()
+        if prev_el is not None and prev_el.tag == qn("w:p"):
+            text = Paragraph(prev_el, None).text.strip()
+            if self._looks_like_caption(text):
+                return text
+        return None
+
     def _looks_like_caption(self, text: str) -> bool:
         """
         Very simple heuristic: detect typical caption patterns.
@@ -139,6 +154,6 @@ class DOCXBlockParser:
             return False
 
         lower = text.lower()
-        caption_keywords = ["table", "figure", "fig.", "image", "chart"]
+        caption_keywords = ["table", "figure", "fig.", "image", "chart", "photo", "plate"]
 
         return any(keyword in lower for keyword in caption_keywords)

@@ -58,3 +58,11 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Runtime persisted data (users, jobs) — not source code
+backend/data/
+
+# Test/verification artifacts
+*.png
+verify_*.mjs
+verify_*.js

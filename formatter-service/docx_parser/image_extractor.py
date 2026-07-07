@@ -3,39 +3,55 @@
 from typing import List, Dict, Any
 from docx.oxml.ns import qn
 
+# Clark-notation tags — avoids relying on namespace prefix maps being present
+_W_DRAWING   = qn("w:drawing")
+_W_PICT      = qn("w:pict")
+
+# DrawingML: <a:blip r:embed="rId7"/>
+_A_BLIP      = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+_R_EMBED     = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+
+# VML: <v:imagedata r:id="rId5" o:title="..."/>
+_V_IMAGEDATA = "{urn:schemas-microsoft-com:vml}imagedata"
+_R_ID        = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+
 
 def extract_images_from_paragraph(paragraph_element, parent_block_id: str) -> List[Dict[str, Any]]:
     """
-    Scan a <w:p> paragraph element for embedded images (w:drawing → a:blip).
-    Returns a list of image block dicts with:
-      - id: F# (assigned later by the parser)
-      - type: "image"
-      - rel: relationship id (r:embed value), e.g. "rId7"
-      - caption_guess: reserved for future caption detection
-      - parent: the parent paragraph block id (e.g. "P12")
+    Scan a <w:p> element for embedded images in both formats:
+      - DrawingML: <w:drawing> → <a:blip r:embed="rId7"/>
+      - VML:       <w:pict>   → <v:imagedata r:id="rId5"/>
+
+    Returns image block dicts with rel (relationship id) and parent block id.
     """
     images: List[Dict[str, Any]] = []
 
-    # paragraph_element is a CT_P (<w:p>). We look for nested <w:drawing> elements.
     for el in paragraph_element.iter():
-        if el.tag == qn("w:drawing"):
-            # Look for <a:blip> inside the drawing, which holds r:embed
-            blip = el.find(".//a:blip", namespaces=el.nsmap)
-            if blip is None:
-                continue
+        rel_id = None
 
-            rel_id = blip.get(qn("r:embed"))
-            if not rel_id:
-                continue
+        if el.tag == _W_DRAWING:
+            # DrawingML — find the blip anywhere inside the drawing
+            blip = el.find(f".//{_A_BLIP}")
+            if blip is not None:
+                rel_id = blip.get(_R_EMBED)
 
+        elif el.tag == _W_PICT:
+            # VML — find <v:imagedata> anywhere inside the picture block
+            imagedata = el.find(f".//{_V_IMAGEDATA}")
+            if imagedata is not None:
+                rel_id = imagedata.get(_R_ID)
+
+        if rel_id:
             images.append(
                 {
-                    "id": None,  # will be filled in by DOCXBlockParser
+                    "id": None,          # filled in by DOCXBlockParser
                     "type": "image",
                     "rel": rel_id,
                     "caption_guess": None,
                     "parent": parent_block_id,
                 }
             )
+            # One image per drawing/pict block — skip children to avoid duplicates
+            continue
 
     return images

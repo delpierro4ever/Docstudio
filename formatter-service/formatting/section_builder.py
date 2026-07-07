@@ -133,6 +133,16 @@ def _set_page_number_format(section, fmt: str, start: Optional[int] = None) -> N
             del pgNumType.attrib[qn("w:start")]
 
 
+def add_arabic_page_numbers(doc: Document) -> None:
+    """
+    Add simple Arabic (decimal) page numbering to every section in the
+    document — used by the quick/print-ready pipeline which has no
+    prelim/main split.
+    """
+    for i, section in enumerate(doc.sections):
+        _apply_main_page_numbering(section, restart_at_1=(i == 0))
+
+
 def _ensure_page_field_in_footer(footer) -> None:
     """
     Insert a { PAGE } field in the footer, right-aligned, if not already

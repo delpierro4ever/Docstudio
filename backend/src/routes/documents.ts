@@ -68,11 +68,11 @@ router.post(
       }
 
       // Validate documentType
-      const allowedTypes = ["report", "undergraduate", "masters", "phd"];
+      const allowedTypes = ["report", "undergraduate", "masters", "phd", "print_ready"];
       if (!documentType || !allowedTypes.includes(documentType)) {
         return res.status(400).json({
           error:
-            "Invalid documentType. Use one of: report, undergraduate, masters, phd",
+            "Invalid documentType. Use one of: report, undergraduate, masters, phd, print_ready",
         });
       }
 
@@ -117,6 +117,7 @@ router.post(
         formattedBuffer = await callPythonFormatter({
           filePath: job.inputPath,
           profileId: job.profileId,
+          documentType: job.documentType,
         });
       } catch (err: any) {
         console.error("Error calling Python formatter:", err);
@@ -301,6 +302,7 @@ router.post(
         formattedBuffer = await callPythonFormatter({
           filePath: job.inputPath,
           profileId: job.profileId,
+          documentType: job.documentType,
         });
       } catch (err: any) {
         console.error("Error re-running Python formatter:", err);

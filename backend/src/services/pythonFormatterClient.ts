@@ -8,6 +8,7 @@ import FormData from "form-data";
 export interface PythonFormatterRequest {
   filePath: string;
   profileId: string;
+  documentType?: string;
 }
 
 /**
@@ -17,7 +18,7 @@ export interface PythonFormatterRequest {
 export async function callPythonFormatter(
   params: PythonFormatterRequest
 ): Promise<Buffer> {
-  const { filePath, profileId } = params;
+  const { filePath, profileId, documentType = "report" } = params;
 
   // Absolute path check
   const absPath = path.resolve(filePath);
@@ -29,6 +30,7 @@ export async function callPythonFormatter(
   const form = new FormData();
   form.append("file", fs.createReadStream(absPath));
   form.append("profileId", profileId);
+  form.append("documentType", documentType);
 
   const url = "http://localhost:8082/format"; // must match uvicorn port
 

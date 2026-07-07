@@ -1,10 +1,51 @@
 # formatter-service/pipeline/docx_pipeline.py
 
+from io import BytesIO
 from typing import Optional, Dict, Any, List
 
+from docx import Document
 from docx_parser import DOCXBlockParser
 from llm.client import LLMClassifier
+from config.profiles import load_profile
 from formatting.formatter import format_docx
+from formatting.basic_style import apply_basic_style
+from formatting.field_updater import enable_update_fields_on_open
+from formatting.section_builder import add_arabic_page_numbers
+
+
+def run_quick_pipeline(
+    input_path: str,
+    profile_id: Optional[str] = None,
+) -> bytes:
+    """
+    Lightweight pipeline for print-ready documents (reports to print).
+
+    Skips LLM classification and preliminary pages.
+    Only applies: font, line spacing, paragraph style, margins, heading
+    styles, and simple Arabic page numbering.
+    """
+    profile = load_profile(profile_id)
+    doc = Document(input_path)
+
+    try:
+        apply_basic_style(doc, profile, metadata=None)
+    except Exception as exc:
+        print(f"[WARN] quick apply_basic_style failed: {exc}")
+
+    try:
+        add_arabic_page_numbers(doc)
+    except Exception as exc:
+        print(f"[WARN] quick add_arabic_page_numbers failed: {exc}")
+
+    try:
+        enable_update_fields_on_open(doc)
+    except Exception as exc:
+        print(f"[WARN] quick enable_update_fields_on_open failed: {exc}")
+
+    bio = BytesIO()
+    doc.save(bio)
+    print("[INFO] Quick format complete (no LLM, no prelim pages)")
+    return bio.getvalue()
 
 
 def run_pipeline(

@@ -16,6 +16,10 @@
     "phd": {
       "label": "PhD Thesis",
       "basePriceCfa": 4000
+    },
+    "print_ready": {
+      "label": "Quick Print Format",
+      "basePriceCfa": 200
     }
   }
 }

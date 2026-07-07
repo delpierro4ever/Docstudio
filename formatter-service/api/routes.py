@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
 
-from pipeline.docx_pipeline import run_pipeline
+from pipeline.docx_pipeline import run_pipeline, run_quick_pipeline
 
 router = APIRouter()
 
@@ -21,6 +21,7 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 async def format_document(
     file: UploadFile = File(...),
     profileId: str = Form(...),
+    documentType: str = Form("report"),
 ):
     """
     Main endpoint called by the Node backend.
@@ -49,12 +50,18 @@ async def format_document(
             detail=f"Failed to save uploaded file: {e}",
         )
 
-    # 2) Run entire pipeline
+    # 2) Run pipeline — quick (print-ready) or full
     try:
-        output_bytes = run_pipeline(
-            input_path=str(temp_path),
-            profile_id=profileId,
-        )
+        if documentType == "print_ready":
+            output_bytes = run_quick_pipeline(
+                input_path=str(temp_path),
+                profile_id=profileId,
+            )
+        else:
+            output_bytes = run_pipeline(
+                input_path=str(temp_path),
+                profile_id=profileId,
+            )
     except FileNotFoundError:
         # Shouldn't happen, but just in case
         raise HTTPException(status_code=404, detail="Input file not found")

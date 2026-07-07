@@ -84,6 +84,7 @@ export default function DocumentViewerPage() {
       undergraduate: "Undergraduate Thesis",
       masters: "Masters Thesis",
       phd: "PhD Thesis",
+      print_ready: "Quick Print Format",
     };
     return labels[type] ?? type;
   }

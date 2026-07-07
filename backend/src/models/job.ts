@@ -1,6 +1,6 @@
 export type JobStatus = "pending" | "processing" | "done" | "error";
 
-export type DocumentType = "report" | "undergraduate" | "masters" | "phd";
+export type DocumentType = "report" | "undergraduate" | "masters" | "phd" | "print_ready";
 
 export interface Job {
   id: string;

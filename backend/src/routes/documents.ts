@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import { extractPreviewHtml } from "../services/preview";
 
-import { findUserById } from "../stores/userStore";
+import { findUserById, saveUser } from "../stores/userStore";
 import { getTextProfiles } from "../config/formattingRules";
 import { callPythonFormatter } from "../services/pythonFormatterClient";
 import { getPriceForDocumentType } from "../config/pricingRules";
@@ -150,6 +150,7 @@ router.post(
       if (job.isFree && user.freeRemaining > 0) {
         user.freeRemaining -= 1;
         user.updatedAt = new Date();
+        saveUser(user);
       }
 
       return res.status(201).json({

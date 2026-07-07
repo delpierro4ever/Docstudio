@@ -23,8 +23,14 @@ export default function DocumentsPage() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!getUserId()) {
+      router.push("/login");
+      return;
+    }
+  }, [router]);
+
+  useEffect(() => {
     const uid = getUserId();
-    // Login check temporarily disabled for testing
 
     async function loadJobs() {
       try {
@@ -51,30 +57,41 @@ export default function DocumentsPage() {
     return d.toLocaleString();
   }
 
-  async function handleDownload(jobId: string) {
+  async function handleDownload(jobId: string, documentType: string) {
     const uid = getUserId();
-    // Login check temporarily disabled for testing
+    if (!uid) {
+      router.push("/login");
+      return;
+    }
 
-    // Direct link to avoid Blob memory issues and browser interruptions
     try {
       setDownloadingId(jobId);
       setError("");
 
-      const downloadUrl = `${API_BASE}/documents/${jobId}/download`;
+      const res = await fetch(`${API_BASE}/documents/${jobId}/download`, {
+        headers: { "x-user-id": uid },
+      });
 
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Download error:", text);
+        setError("Failed to download file.");
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.setAttribute('download', `${jobId}.docx`);
+      link.href = url;
+      link.setAttribute("download", `${documentType}-${jobId}.docx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
-
-      // Hand off to browser download manager
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
       setError("Failed to download file.");
     } finally {
-      // Small delay to reset UI state
       setTimeout(() => setDownloadingId(null), 1000);
     }
   }
@@ -278,7 +295,7 @@ export default function DocumentsPage() {
 
                           {job.status === "done" ? (
                             <button
-                              onClick={() => handleDownload(job.id)}
+                              onClick={() => handleDownload(job.id, job.documentType)}
                               className="text-xs text-sky-300 hover:text-sky-200 underline disabled:opacity-60 text-left"
                               disabled={downloadingId === job.id}
                             >

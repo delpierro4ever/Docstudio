@@ -81,20 +81,20 @@ FastAPI formatter-service (:8082)
 
 Pages:
 - `/` — redirects to `/dashboard` if logged in, else `/login`
-- `/login`, `/register` — email/password auth, stores `userId` in localStorage
+- `/login`, `/register` — email/password auth; the server sets a session cookie
 - `/dashboard` — shows user info and quick actions
 - `/upload` — mode-selection screen (Full vs Quick), then file + profile form
 - `/documents` — list of the user's past jobs with download links
 - `/dashboard/documents/[id]` — job detail page with download button
 
-Auth is localStorage-based. Every API request sends `x-user-id` as a custom header. The backend validates this against its user store. There are no JWTs or sessions — this is intentional for simplicity at this stage.
+Auth uses server sessions. Register/login set a random session token in an `HttpOnly; SameSite=Lax` cookie (`Secure` when `COOKIE_SECURE=true`), valid for 30 days; the backend stores only its SHA-256 hash (`data/sessions.json`) and resolves the user from it on every request. `/auth/logout` ends the session. Scripts cannot read the cookie; `localStorage` keeps only the user's id as a hint so pages can redirect to `/login` without a round trip, and any `401` from the API clears it and redirects.
 
-Downloads use `fetch()` + `URL.createObjectURL()` rather than a plain `<a href>` link, because browsers do not send custom headers on direct navigation.
+Because the browser sends the cookie automatically, downloads are plain `<a href>` links.
 
 ### backend (Express + TypeScript, port 4000)
 
 The backend is a thin gateway. Its jobs:
-1. Validate auth (`x-user-id` header → user lookup)
+1. Validate auth (session cookie → session store → user lookup)
 2. Handle file uploads (multer → temp file on disk)
 3. Create a job record, call the formatter, save the output file, update the job
 4. Serve download endpoints
@@ -190,7 +190,7 @@ Build the frontend and serve it on all interfaces; keep the other two on localho
 cd frontend && npm run build && npx next start -H 0.0.0.0 -p 3000
 ```
 
-Then browse to `http://<server-ip>:3000`. Only port 3000 needs to be reachable. Note that logins are identified by an `x-user-id` header rather than a session token, so this is suitable for testing, not yet for public production use.
+Then browse to `http://<server-ip>:3000`. Only port 3000 needs to be reachable. For real users, serve it over HTTPS behind nginx and set `COOKIE_SECURE=true` (see Production below).
 
 ### Production (the live server)
 

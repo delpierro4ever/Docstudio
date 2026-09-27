@@ -12,25 +12,40 @@ The system is built to handle real student documents, which means messy input: i
 
 ---
 
-## Two formatting modes
+## Three formatting categories
 
-### Full Thesis Format
-For theses and formal academic reports. Runs the complete pipeline:
-- LLM classifies the document structure (sections, headings, tables, figures, references)
+| | **Thesis** | **Report** | **Quick Format** |
+|---|---|---|---|
+| `documentType` | `undergraduate` / `masters` / `phd` | `report` | `print_ready` |
+| Price (FCFA) | 1500 / 2500 / 4000 | 500 | 200 |
+| Font, spacing, margins, heading styles | ✓ | ✓ | ✓ |
+| Structure classification (LLM or heuristic) | ✓ | ✓ | – |
+| Grammar & spelling corrections (LLM) | ✓ | ✓ | – |
+| Table/figure captions with `SEQ` numbering | ✓ | ✓ | – |
+| Table of Contents, List of Tables/Figures, Abbreviations | ✓ | – | – |
+| Page numbers | Roman (i, ii) prelims, Arabic from 1 at Chapter 1 | Arabic 1, 2, 3… | Arabic 1, 2, 3… |
+
+In every category the footer is replaced by a single, bare page number:
+existing footer text and fields such as "Page X of Y" are removed.
+
+### Thesis
+For undergraduate, masters and PhD theses. Runs the complete pipeline:
+- Classifies the document structure (sections, headings, tables, figures, references)
 - Generates all required preliminary pages: Table of Contents, List of Tables, List of Figures, List of Abbreviations
 - Normalises table and figure captions with real Word `SEQ` fields so numbering (Table 2.3, Figure 1.1) stays correct when content moves
 - Applies section breaks — roman numerals (i, ii, iii) for prelims, Arabic restarting at 1 for main content
 - Applies the chosen formatting profile (font, spacing, margins, heading styles)
 
-### Quick Print Format
-For reports that just need to look clean before printing. Skips the LLM entirely and skips all preliminary pages. Applies only:
+### Report
+For reports that need clean formatting and corrections but no preliminary pages. Same engine as Thesis, but no generated TOC/lists and simple Arabic numbering from page 1.
+
+### Quick Format
+For documents that just need to look clean before printing. Skips the LLM entirely (text is never changed) and applies only:
 - Font family and size
 - Line spacing and paragraph style
 - Page margins
 - Heading styles
 - Simple Arabic page numbering
-
-This mode is significantly faster and cheaper (200 FCFA vs 500+ for full format) because there is no LLM call.
 
 ---
 
@@ -94,7 +109,7 @@ The backend is a thin gateway. Its jobs:
 
 The formatter is a Python microservice. Node sends it the raw upload file + `profileId` + `documentType` via multipart form. It returns the formatted DOCX as raw bytes.
 
-#### Full pipeline (`documentType != "print_ready"`)
+#### Full pipeline (Thesis and Report)
 
 1. **Parse** — `docx_parser/parser.py` walks the DOCX XML and produces an ordered list of typed blocks:
    - `P#` — paragraph blocks (body text, headings, captions)
@@ -106,14 +121,16 @@ The formatter is a Python microservice. Node sends it the raw upload file + `pro
 3. **Format** — `formatting/formatter.py` orchestrates the pipeline in strict order. Ordering matters because early steps map block IDs to paragraph indices in `doc.paragraphs`, and that mapping breaks the moment any paragraph is inserted or removed:
    - `apply_basic_style` — fonts, spacing, margins, heading styles
    - `apply_headings` — applies Heading 1/2/3 styles to classified headings
+   - `_apply_proofreading` — LLM grammar/spelling corrections on body paragraphs (needs an API key; `DOCSTUDIO_PROOFREAD=0` disables)
    - `apply_tables_and_figures` — rewrites captions with `SEQ` fields, repositions captions (above tables, below figures), creates captions for uncaptioned figures
    - `format_references_section` — hanging-indent style for reference lists
-   - *Anchor resolution* — finds the first main-content paragraph as a live object before any insertions
-   - Prelim page insertion in reverse order (TOC, LOT, LOF, abbreviations), each inserted just before the anchor
-   - `apply_sections` — inserts the section break at the prelim/main boundary, applies roman numbering to prelim, Arabic to main
+   - *Thesis only:* anchor resolution — finds the first main-content paragraph as a live object before any insertions
+   - *Thesis only:* prelim page insertion in reverse order (TOC, LOT, LOF, abbreviations), each inserted just before the anchor
+   - *Thesis only:* `apply_sections` — inserts the section break at the prelim/main boundary, applies roman numbering to prelim, Arabic to main
+   - *Report only:* `add_arabic_page_numbers` — Arabic numbering from page 1
    - `enable_update_fields_on_open` — sets a Word document flag so TOC/LOT/LOF/SEQ/PAGE fields refresh automatically when opened
 
-#### Quick pipeline (`documentType == "print_ready"`)
+#### Quick pipeline (Quick Format, `documentType == "print_ready"`)
 
 Skips parsing, LLM, captions, references, and prelim pages entirely. Only runs `apply_basic_style` + `add_arabic_page_numbers` + `enable_update_fields_on_open`.
 

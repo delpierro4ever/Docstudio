@@ -131,6 +131,25 @@ class LLMJsonTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 normalize_classification(data, self.blocks)
 
+    def test_normalize_sets_media_chapter_from_position(self):
+        blocks = [
+            {"id": "P1", "type": "paragraph", "text": "CHAPTER ONE"},
+            {"id": "T1", "type": "table"},
+            {"id": "P2", "type": "paragraph", "text": "CHAPTER TWO"},
+            {"id": "P3", "type": "paragraph", "text": ""},
+            {"id": "F1", "type": "image", "parent": "P3"},
+        ]
+        data = {"blocks": {
+            "P1": {"role": "chapter_heading", "chapter": 1},
+            "T1": {"role": "table", "chapter": 2},        # wrong
+            "P2": {"role": "chapter_heading"},            # chapter omitted
+            "F1": {"role": "figure"},                     # chapter omitted
+        }}
+        out = normalize_classification(data, blocks)
+        self.assertEqual(out["blocks"]["T1"]["chapter"], 1)
+        self.assertEqual(out["blocks"]["P2"]["chapter"], 2)
+        self.assertEqual(out["blocks"]["F1"]["chapter"], 2)
+
     def test_normalize_repairs_bad_boundary(self):
         fallback = classify_blocks_heuristically(self.blocks)
         data = {"blocks": {"P1": {"role": "body_paragraph", "section": "bogus"}},

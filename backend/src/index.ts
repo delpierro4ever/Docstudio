@@ -6,6 +6,7 @@ import centersRoutes from "./routes/centers";
 import profilesRouter from "./routes/profiles";
 import feedbackRouter from "./routes/feedback";
 import adminRouter from "./routes/admin";
+import guestRouter, { sweepExpiredGuestJobs } from "./routes/guest";
 
 const app = express();
 
@@ -34,9 +35,14 @@ app.use("/", centersRoutes);
 app.use("/", profilesRouter);
 app.use("/", feedbackRouter);
 app.use("/", adminRouter);
+app.use("/", guestRouter);
 
 // auth router handles /auth/register, /auth/login, /auth/me, /auth/logout
 app.use("/auth", authRouter);
+
+// Unclaimed "try it" documents expire; sweep at startup and hourly.
+sweepExpiredGuestJobs();
+setInterval(sweepExpiredGuestJobs, 60 * 60 * 1000).unref();
 
 const PORT = Number(process.env.PORT) || 4000;
 // Localhost only by default: browsers reach the backend through the

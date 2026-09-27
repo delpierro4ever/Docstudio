@@ -17,9 +17,10 @@ const PORT = 4900 + Math.floor(Math.random() * 90);
 const BASE = `http://127.0.0.1:${PORT}`;
 const ADMIN_KEY = "test-admin-key";
 
-let tmp, server, formatter, formatterUrl;
+let tmp, server, formatter, formatterUrl, previewStub;
 
-// Stub formatter: "bad" in the upload -> 422, otherwise a fake DOCX.
+// Stub formatter: "BAD-DOCX" in the upload -> 422, otherwise a fake DOCX
+// (carrying a "NO-PREVIEW" marker through for the preview stub).
 function startStubFormatter() {
   return new Promise((resolve) => {
     formatter = http.createServer((req, res) => {
@@ -32,7 +33,7 @@ function startStubFormatter() {
           return res.end(JSON.stringify({ detail: "The uploaded file is not a valid .docx document" }));
         }
         res.writeHead(200, { "content-type": "application/octet-stream" });
-        res.end(Buffer.from("PK-formatted-docx"));
+        res.end(Buffer.from(body.includes("NO-PREVIEW") ? "PK-formatted-docx NO-PREVIEW" : "PK-formatted-docx"));
       });
     });
     formatter.listen(0, "127.0.0.1", () => {
@@ -55,6 +56,15 @@ async function waitForServer() {
 before(async () => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), "docstudio-test-"));
   await startStubFormatter();
+  // Stub preview renderer, run as PREVIEW_PYTHON <script> <in> <outDir> <max>:
+  // "NO-PREVIEW" in the formatted file -> failure, otherwise two pages.
+  previewStub = path.join(tmp, "preview-stub.sh");
+  fs.writeFileSync(previewStub, [
+    "#!/bin/sh",
+    'grep -q NO-PREVIEW "$2" && { echo "render failed" >&2; exit 1; }',
+    'mkdir -p "$3" && printf PNG1 > "$3/1.png" && printf PNG2 > "$3/2.png"',
+    'echo \'{"pageCount": 12, "pages": [1, 7]}\'',
+  ].join("\n"), { mode: 0o755 });
   server = spawn(process.execPath, [path.join(BACKEND, "dist", "index.js")], {
     env: {
       ...process.env,
@@ -66,6 +76,8 @@ before(async () => {
       DAILY_JOB_LIMIT: "3",
       MAX_UPLOAD_MB: "1",
       BILLING_ENABLED: "",
+      PREVIEW_PYTHON: previewStub,
+      GUEST_DAILY_LIMIT: "4",
     },
     stdio: "ignore",
   });
@@ -80,10 +92,10 @@ after(() => {
 
 /** A tiny cookie-jar client. */
 function client() {
-  let cookie = "";
+  const jar = new Map();
   return async (method, url, { json, form, headers = {} } = {}) => {
     const init = { method, headers: { ...headers } };
-    if (cookie) init.headers.cookie = cookie;
+    if (jar.size) init.headers.cookie = [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
     if (json) {
       init.headers["content-type"] = "application/json";
       init.body = JSON.stringify(json);
@@ -91,7 +103,13 @@ function client() {
     if (form) init.body = form;
     const res = await fetch(BASE + url, init);
     const setCookie = res.headers.get("set-cookie");
-    if (setCookie) cookie = setCookie.split(";")[0];
+    for (const c of res.headers.getSetCookie()) {
+      const [pair] = c.split(";");
+      const i = pair.indexOf("=");
+      const [name, value] = [pair.slice(0, i), pair.slice(i + 1)];
+      if (!value || /Expires=Thu, 01 Jan 1970/i.test(c)) jar.delete(name);
+      else jar.set(name, value);
+    }
     const type = res.headers.get("content-type") || "";
     const body = type.includes("json") ? await res.json() : await res.arrayBuffer();
     return { status: res.status, body, setCookie };
@@ -257,4 +275,65 @@ test("centers: creating one never returns the password hash", async () => {
   assert.equal(res.status, 201);
   assert.equal(res.body.user.passwordHash, undefined);
   assert.equal((await api("GET", "/centers/me")).status, 200);
+});
+
+test("a visitor can try without an account, see previews, and claim on register", async () => {
+  const guest = client();
+  const res = await guest("POST", "/try", { form: docxForm("Trial Thesis.docx", "PK", "undergraduate") });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.match(res.setCookie, /ds_guest=.*HttpOnly/i);
+  const job = res.body.job;
+  assert.equal(job.status, "done");
+  assert.deepEqual(job.previewPages, [1, 7]);
+  assert.equal(job.pageCount, 12);
+  assert.equal(job.guestId, undefined);
+
+  // Previews for this browser only; no download without an account.
+  const img = await guest("GET", `/try/${job.id}/preview/2`);
+  assert.equal(img.status, 200);
+  assert.equal(Buffer.from(img.body).toString(), "PNG2");
+  assert.equal((await guest("GET", `/try/${job.id}/preview/3`)).status, 404);
+  assert.equal((await client()("GET", `/try/${job.id}`)).status, 404);
+  assert.equal((await client()("GET", `/try/${job.id}/preview/1`)).status, 404);
+  assert.equal((await guest("GET", `/documents/${job.id}/download`)).status, 401);
+
+  const n = `${Date.now()}g`;
+  const reg = await guest("POST", "/auth/register", {
+    json: { fullName: "Guest", email: `g${n}@test.local`, phone: `5${n.slice(-8)}`, password: "secret123" },
+  });
+  assert.equal(reg.status, 201);
+  assert.deepEqual(reg.body.claimedJobIds, [job.id]);
+
+  const dl = await guest("GET", `/documents/${job.id}/download`);
+  assert.equal(dl.status, 200);
+  assert.equal(Buffer.from(dl.body).toString(), "PK-formatted-docx");
+  assert.equal((await guest("GET", `/documents/${job.id}/preview/1`)).status, 200);
+  assert.equal((await guest("GET", `/try/${job.id}`)).status, 404);   // no longer a guest job
+  assert.equal((await guest("GET", "/documents")).body.length, 1);
+});
+
+test("an existing user claims their trial by logging in", async () => {
+  const { email } = await registered();
+  const guest = client();
+  const job = (await guest("POST", "/try", { form: docxForm("Trial Report.docx") })).body.job;
+  const login = await guest("POST", "/auth/login", { json: { identifier: email, password: "secret123" } });
+  assert.equal(login.status, 200);
+  assert.deepEqual(login.body.claimedJobIds, [job.id]);
+  assert.equal((await guest("GET", `/documents/${job.id}`)).body.originalName, "Trial Report.docx");
+});
+
+test("a failed preview still delivers the formatted document", async () => {
+  const guest = client();
+  const res = await guest("POST", "/try", { form: docxForm("np.docx", "PK NO-PREVIEW") });
+  assert.equal(res.status, 201, JSON.stringify(res.body));
+  assert.deepEqual(res.body.job.previewPages, []);
+});
+
+test("trials are limited per visitor per day", async () => {
+  // Earlier tests used 3 of the 4 tries allowed from 127.0.0.1.
+  const guest = client();
+  assert.equal((await guest("POST", "/try", { form: docxForm() })).status, 201);
+  const res = await guest("POST", "/try", { form: docxForm() });
+  assert.equal(res.status, 429);
+  assert.match(res.body.error, /free 4 tries/);
 });

@@ -9,6 +9,11 @@ cd "$APP"
 
 git pull --ff-only
 
+# Guest-trial previews need LibreOffice + poppler (see README).
+for cmd in soffice pdftoppm; do
+  command -v "$cmd" >/dev/null || { echo "missing $cmd: sudo apt-get install -y libreoffice-writer-nogui python3-uno poppler-utils fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea" >&2; exit 1; }
+done
+
 (cd formatter-service && .venv/bin/pip install -q -r requirements.txt)
 (cd backend && npm ci --silent && npm run build)
 (cd frontend && npm ci --silent && npm run build)

@@ -159,6 +159,11 @@ export default function DocumentViewerPage() {
             </div>
           </div>
 
+          {router.query.claimed && (
+            <p className="text-emerald-200 text-sm bg-emerald-500/10 border border-emerald-400/20 rounded-lg px-3 py-2 mb-4">
+              Welcome! The document you formatted is now saved in your account.
+            </p>
+          )}
           {job.status === "error" && job.errorMessage && (
             <p className="text-red-300 text-xs mb-4">Formatting failed: {job.errorMessage}</p>
           )}

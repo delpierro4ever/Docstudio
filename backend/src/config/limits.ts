@@ -23,3 +23,23 @@ export function dailyJobLimit(): number {
 export function maxUploadBytes(): number {
   return envInt("MAX_UPLOAD_MB", 25) * 1024 * 1024;
 }
+
+/** Visitors may format a document without an account ("try it first"). */
+export function guestTrialEnabled(): boolean {
+  return process.env.GUEST_TRIAL_ENABLED !== "false";
+}
+
+/** Trial documents one visitor (IP address) may format per 24 hours. */
+export function guestDailyLimit(): number {
+  return envInt("GUEST_DAILY_LIMIT", 2);
+}
+
+/** Trial documents all visitors together may format per 24 hours. */
+export function guestGlobalDailyLimit(): number {
+  return envInt("GUEST_GLOBAL_DAILY_LIMIT", 100);
+}
+
+/** Unclaimed trial documents are deleted after this many hours. */
+export function guestRetentionHours(): number {
+  return envInt("GUEST_RETENTION_HOURS", 48);
+}

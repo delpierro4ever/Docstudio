@@ -63,6 +63,11 @@ export function updateJob(id: string, data: Partial<Job>): Job | undefined {
   return job;
 }
 
+export function removeJob(id: string): void {
+  jobs = jobs.filter((j) => j.id !== id);
+  save(jobs);
+}
+
 export function findJobsByCenter(centerId: string): Job[] {
   return jobs.filter((j) => j.centerId === centerId);
 }

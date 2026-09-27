@@ -26,7 +26,10 @@ app.use("/", profilesRouter);
 // single auth router handles /auth/register, /auth/login, /auth/me
 app.use("/auth", authRouter);
 
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
+const PORT = Number(process.env.PORT) || 4000;
+// Localhost only by default: browsers reach the backend through the
+// frontend's /backend relay. Set HOST=0.0.0.0 to expose it directly.
+const HOST = process.env.HOST || "127.0.0.1";
+app.listen(PORT, HOST, () => {
+  console.log(`Backend running on http://${HOST}:${PORT}`);
 });

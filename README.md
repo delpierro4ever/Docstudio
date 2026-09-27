@@ -158,7 +158,7 @@ The extractor handles both by using Clark-notation namespace strings (e.g. `{urn
 
 ## Running locally
 
-Ports: frontend **3000**, backend **4000**, formatter-service **8082**.
+Ports: frontend **3000**, backend **4000**, formatter-service **8082**. The browser only ever talks to the frontend: requests to `/backend/*` are relayed to the backend (Next.js rewrite in `frontend/next.config.ts`), so the backend and formatter listen on localhost only.
 
 ```bash
 # 1. Formatter service (terminal 1)
@@ -167,20 +167,30 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 # Optional: an OpenRouter key enables LLM classification (heuristic otherwise)
 echo "OPENROUTER_API_KEY=sk-or-v1-..." > .env
-PYTHONUTF8=1 .venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8082
+PYTHONUTF8=1 .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8082
 
 # 2. Backend gateway (terminal 2)
 cd backend
 npm ci
-npm run dev    # starts on :4000
+npm run dev    # listens on 127.0.0.1:4000
 
 # 3. Frontend (terminal 3)
 cd frontend
 npm ci
-npm run dev    # starts on :3000  (or: npm run build && npm start)
+npm run dev    # http://localhost:3000
 ```
 
 Open http://localhost:3000 in your browser. Register an account — accounts and jobs persist to `backend/data/` and survive restarts.
+
+### Running on a server (access from another machine)
+
+Build the frontend and serve it on all interfaces; keep the other two on localhost:
+
+```bash
+cd frontend && npm run build && npx next start -H 0.0.0.0 -p 3000
+```
+
+Then browse to `http://<server-ip>:3000`. Only port 3000 needs to be reachable. Note that logins are identified by an `x-user-id` header rather than a session token, so this is suitable for testing, not yet for public production use.
 
 ### Tests and output inspection
 
@@ -210,8 +220,16 @@ cd ../frontend && npx tsc --noEmit && npm run build
 | Variable | Default | Effect |
 |---|---|---|
 | `PORT` | `4000` | Backend port |
+| `HOST` | `127.0.0.1` | Backend bind address; `0.0.0.0` to expose it directly |
 | `FORMATTER_URL` | `http://localhost:8082` | Formatter-service base URL |
 | `FORMATTER_TIMEOUT_MS` | `300000` | Max time to wait for one formatting job |
+
+### Environment variables (frontend)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `BACKEND_URL` | `http://localhost:4000` | Where the `/backend/*` relay forwards to (read at build/start) |
+| `NEXT_PUBLIC_API_BASE` | `/backend` | Base URL the browser uses for API calls; set to call a backend directly |
 
 ---
 

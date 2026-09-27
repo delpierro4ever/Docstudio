@@ -23,7 +23,7 @@ from .field_updater import (
 )
 from .heading_builder import apply_headings
 from .references_builder import format_references_section
-from .section_builder import apply_sections
+from .section_builder import add_arabic_page_numbers, apply_sections
 from .table_figure_builder import apply_tables_and_figures, insert_list_of_entries
 from .toc_builder import insert_table_of_contents
 
@@ -34,6 +34,10 @@ _GENERATED_PRELIM_ITEMS = [
     "listOfFigures",
     "abbreviations",
 ]
+
+# format_docx modes
+THESIS = "thesis"  # everything, incl. prelim pages + roman/arabic split
+REPORT = "report"  # no generated prelim pages; arabic numbering throughout
 
 
 def _get_paragraph_index_for_block(
@@ -161,54 +165,13 @@ def _apply_proofreading(
     print(f"[INFO] Proofreading: corrected {applied} paragraph(s)")
 
 
-def format_docx(
-    input_path: str,
+def _insert_prelim_pages_and_sections(
+    doc: Document,
     blocks: List[Dict[str, Any]],
     metadata: Dict[str, Any],
-    profile_id: Optional[str] = None,
-) -> bytes:
-    """
-    Main entry point for building the final formatted DOCX.
-
-    Ordering matters: every pass that maps block ids onto doc.paragraphs
-    (steps 1-4 and anchor resolution) runs BEFORE any paragraph is
-    inserted, because insertion shifts the mapping.
-    """
-
-    profile = load_profile(profile_id)
-    doc = Document(input_path)
-
-    # 1. Global style + heading styles (indices aligned)
-    try:
-        apply_basic_style(doc, profile, metadata)
-    except Exception as exc:
-        print(f"[WARN] apply_basic_style failed: {exc}")
-
-    try:
-        apply_headings(doc, blocks, metadata, profile)
-    except Exception as exc:
-        print(f"[WARN] apply_headings failed: {exc}")
-
-    # 2. Grammar/spelling corrections (text-only; indices stay aligned)
-    grammar_enabled = (profile.get("grammar", {}) or {}).get("enabled", True)
-    if grammar_enabled and proofreading_enabled():
-        try:
-            _apply_proofreading(doc, blocks, metadata)
-        except Exception as exc:
-            print(f"[WARN] proofreading failed: {exc}")
-
-    # 3. Normalize captions with SEQ fields (indices aligned)
-    try:
-        apply_tables_and_figures(doc, blocks, metadata, profile)
-    except Exception as exc:
-        print(f"[WARN] apply_tables_and_figures failed: {exc}")
-
-    # 4. References formatting (indices aligned / text scan)
-    try:
-        format_references_section(doc, blocks, metadata, profile)
-    except Exception as exc:
-        print(f"[WARN] format_references_section raised unexpectedly: {exc}")
-
+    profile: Dict[str, Any],
+) -> None:
+    """Thesis steps: generated prelim pages + roman/arabic section split."""
     # 5. Resolve the main-content anchor ONCE, while indices are aligned.
     #    The Paragraph object stays valid through the insertions below
     #    (they all land before it).
@@ -278,6 +241,68 @@ def format_docx(
         apply_sections(doc, main_anchor)
     except Exception as exc:
         print(f"[WARN] apply_sections failed: {exc}")
+
+
+def format_docx(
+    input_path: str,
+    blocks: List[Dict[str, Any]],
+    metadata: Dict[str, Any],
+    profile_id: Optional[str] = None,
+    mode: str = THESIS,
+) -> bytes:
+    """
+    Main entry point for building the final formatted DOCX.
+
+    mode=THESIS inserts TOC / LOT / LOF / abbreviations and numbers the
+    prelims in roman, main content in arabic. mode=REPORT skips the
+    generated prelim pages and numbers every page 1, 2, 3...
+
+    Ordering matters: every pass that maps block ids onto doc.paragraphs
+    (steps 1-4 and anchor resolution) runs BEFORE any paragraph is
+    inserted, because insertion shifts the mapping.
+    """
+
+    profile = load_profile(profile_id)
+    doc = Document(input_path)
+
+    # 1. Global style + heading styles (indices aligned)
+    try:
+        apply_basic_style(doc, profile, metadata)
+    except Exception as exc:
+        print(f"[WARN] apply_basic_style failed: {exc}")
+
+    try:
+        apply_headings(doc, blocks, metadata, profile)
+    except Exception as exc:
+        print(f"[WARN] apply_headings failed: {exc}")
+
+    # 2. Grammar/spelling corrections (text-only; indices stay aligned)
+    grammar_enabled = (profile.get("grammar", {}) or {}).get("enabled", True)
+    if grammar_enabled and proofreading_enabled():
+        try:
+            _apply_proofreading(doc, blocks, metadata)
+        except Exception as exc:
+            print(f"[WARN] proofreading failed: {exc}")
+
+    # 3. Normalize captions with SEQ fields (indices aligned)
+    try:
+        apply_tables_and_figures(doc, blocks, metadata, profile)
+    except Exception as exc:
+        print(f"[WARN] apply_tables_and_figures failed: {exc}")
+
+    # 4. References formatting (indices aligned / text scan)
+    try:
+        format_references_section(doc, blocks, metadata, profile)
+    except Exception as exc:
+        print(f"[WARN] format_references_section raised unexpectedly: {exc}")
+
+    if mode == REPORT:
+        try:
+            add_arabic_page_numbers(doc)
+        except Exception as exc:
+            print(f"[WARN] add_arabic_page_numbers failed: {exc}")
+    else:
+        _insert_prelim_pages_and_sections(doc, blocks, metadata, profile)
 
     # 9. Make Word refresh all fields (TOC/LOT/LOF/SEQ/PAGE) on open.
     try:

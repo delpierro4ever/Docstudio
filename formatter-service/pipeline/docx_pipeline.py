@@ -8,7 +8,7 @@ from docx import Document
 from docx_parser import DOCXBlockParser
 from llm.client import LLMClassifier
 from config.profiles import load_profile
-from formatting.formatter import format_docx
+from formatting.formatter import THESIS, format_docx
 from formatting.basic_style import apply_basic_style
 from formatting.field_updater import enable_update_fields_on_open
 from formatting.section_builder import add_arabic_page_numbers
@@ -83,6 +83,7 @@ def run_quick_pipeline(
 def run_pipeline(
     input_path: str,
     profile_id: Optional[str] = None,
+    mode: str = THESIS,
 ) -> bytes:
     """
     Full DocStudio pipeline for a single DOCX file.
@@ -95,6 +96,7 @@ def run_pipeline(
 
     :param input_path: Path to the original DOCX file (temp upload).
     :param profile_id: Optional formatting profile (from frontend/backend).
+    :param mode: "thesis" (with generated prelim pages) or "report".
     :return: Bytes of the new formatted DOCX file.
     """
 
@@ -117,6 +119,7 @@ def run_pipeline(
         blocks=blocks,
         metadata=classification_metadata,
         profile_id=profile_id,
+        mode=mode,
     )
 
     return output_bytes

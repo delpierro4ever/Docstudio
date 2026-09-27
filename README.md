@@ -101,7 +101,7 @@ The formatter is a Python microservice. Node sends it the raw upload file + `pro
    - `T#` — table blocks
    - `F#` — image/figure blocks (detected in both DrawingML `<w:drawing>/<a:blip>` and VML `<w:pict>/<v:imagedata>` formats)
 
-2. **LLM classify** — the block list is sent to an OpenRouter LLM (default: `openai/gpt-4o-mini`). The LLM returns a JSON structure that labels each block: its role (body, heading, caption, reference, abbreviation…), which section it belongs to (prelim vs main), and which tables/figures have captions and where.
+2. **LLM classify** — the block list is sent to an OpenRouter LLM (see `LLM_MODEL`), falling back to the rule-based heuristic classifier when no key is set or the LLM fails. The LLM returns a JSON structure that labels each block: its role (body, heading, caption, reference, abbreviation…), which section it belongs to (prelim vs main), and which tables/figures have captions and where.
 
 3. **Format** — `formatting/formatter.py` orchestrates the pipeline in strict order. Ordering matters because early steps map block IDs to paragraph indices in `doc.paragraphs`, and that mapping breaks the moment any paragraph is inserted or removed:
    - `apply_basic_style` — fonts, spacing, margins, heading styles
@@ -131,7 +131,9 @@ Skips parsing, LLM, captions, references, and prelim pages entirely. Only runs `
 
 The extractor handles both by using Clark-notation namespace strings (e.g. `{urn:schemas-microsoft-com:vml}imagedata`) rather than prefix-based lookups, which avoids failures when namespace prefix maps are absent.
 
-**LLM fallback chain:** The classifier tries models in order. If the primary model fails or returns invalid JSON, it tries the next one. The model list and primary are configurable via environment variables.
+**LLM fallback chain:** The classifier tries models in order. If a model fails, times out, or returns JSON that is invalid or has the wrong shape, it tries the next one. If no API key is set or every model fails, `llm/heuristic_classifier.py` classifies the document with rules (`CHAPTER ONE` / `Chapter 2` / `1.0` chapter headings, `1.1` / `1.1.1` numbered headings, known prelim headings, `Table n` / `Figure n` captions, `REFERENCES`) and the pipeline carries on. The heuristic also fills in anything a partial LLM answer left out, including an invalid prelim/main boundary. **Formatting never fails just because the LLM is unavailable.**
+
+**Malformed uploads:** Non-ZIP files (legacy `.doc`, PDF), ZIPs without `word/document.xml`, truncated or corrupt archives, and documents with no text are rejected with HTTP 422 and a readable message, which the backend and upload page pass on to the user.
 
 **Windows encoding:** On Windows, Python's default stdout encoding is cp1252, which crashes when the LLM returns emoji or non-ASCII characters in output. The formatter is launched with `PYTHONUTF8=1` to force UTF-8 throughout.
 
@@ -139,37 +141,60 @@ The extractor handles both by using Clark-notation namespace strings (e.g. `{urn
 
 ## Running locally
 
-```bash
-# 1. Formatter service
-cd formatter-service
-pip install -r requirements.txt
-# Create .env with your OpenRouter key:
-echo "OPENROUTER_API_KEY=sk-or-v1-..." > .env
-echo "DOCSTUDIO_BAKE_FIELDS=0" >> .env   # set to 1 if LibreOffice is installed
-echo "DOCSTUDIO_PROOFREAD=0" >> .env     # set to 1 to enable grammar pass
-PYTHONUTF8=1 python -m uvicorn app:app --host 0.0.0.0 --port 8082
+Ports: frontend **3000**, backend **4000**, formatter-service **8082**.
 
-# 2. Backend gateway
+```bash
+# 1. Formatter service (terminal 1)
+cd formatter-service
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+# Optional: an OpenRouter key enables LLM classification (heuristic otherwise)
+echo "OPENROUTER_API_KEY=sk-or-v1-..." > .env
+PYTHONUTF8=1 .venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8082
+
+# 2. Backend gateway (terminal 2)
 cd backend
-npm install
+npm ci
 npm run dev    # starts on :4000
 
-# 3. Frontend
+# 3. Frontend (terminal 3)
 cd frontend
-npm install
-npm run dev    # starts on :3000
+npm ci
+npm run dev    # starts on :3000  (or: npm run build && npm start)
 ```
 
-Open http://localhost:3000 in your browser. Register an account — accounts now persist to `backend/data/users.json` and survive restarts.
+Open http://localhost:3000 in your browser. Register an account — accounts and jobs persist to `backend/data/` and survive restarts.
+
+### Tests and output inspection
+
+```bash
+cd formatter-service
+.venv/bin/pip install pytest
+.venv/bin/python -m pytest -q tests          # formatter, LLM-failure, bad-JSON, malformed-DOCX tests
+.venv/bin/python test_pipeline.py sample.docx out.docx ub-v1   # run the full pipeline on a file
+.venv/bin/python tools/inspect_docx.py out.docx                 # sections, page numbering, headings, captions, TOC fields
+
+cd ../backend && npx tsc --noEmit
+cd ../frontend && npx tsc --noEmit && npm run build
+```
 
 ### Environment variables (formatter-service)
 
 | Variable | Default | Effect |
 |---|---|---|
-| `OPENROUTER_API_KEY` | — | Required for full format mode (LLM classification) |
-| `LLM_MODEL` | `openai/gpt-4o-mini` | Primary OpenRouter model |
-| `DOCSTUDIO_BAKE_FIELDS` | `0` | Set to `1` to bake TOC/SEQ results via headless LibreOffice |
-| `DOCSTUDIO_PROOFREAD` | `0` | Set to `1` to enable LLM grammar/spelling corrections |
+| `OPENROUTER_API_KEY` | — | Enables LLM classification; without it the heuristic classifier is used |
+| `LLM_MODEL` | `x-ai/grok-4.1-fast:free` | Primary OpenRouter model (then `openai/gpt-4o-mini`, `openai/gpt-4.1-nano`) |
+| `LLM_TIMEOUT_SECONDS` | `60` | Per-model request timeout |
+| `DOCSTUDIO_BAKE_FIELDS` | `1` | Bake TOC/SEQ results via headless LibreOffice when installed; `0` to skip |
+| `DOCSTUDIO_PROOFREAD` | `1` | LLM grammar/spelling pass (only runs with an API key); `0` to disable |
+
+### Environment variables (backend)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `PORT` | `4000` | Backend port |
+| `FORMATTER_URL` | `http://localhost:8082` | Formatter-service base URL |
+| `FORMATTER_TIMEOUT_MS` | `300000` | Max time to wait for one formatting job |
 
 ---
 

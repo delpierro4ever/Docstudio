@@ -3,6 +3,7 @@ import { useRouter } from "next/router";
 import { API_BASE, apiRequest } from "@/lib/api";
 import { getUserId } from "@/lib/auth";
 import Link from "next/link";
+import { docTypeLabel } from "@/lib/documentTypes";
 
 interface JobListItem {
   id: string;
@@ -135,20 +136,6 @@ export default function DocumentsPage() {
     );
   }
 
-  function docTypeLabel(type: string) {
-    switch (type) {
-      case "report":
-        return "Student Report";
-      case "undergraduate":
-        return "Undergraduate Thesis";
-      case "masters":
-        return "Masters Thesis";
-      case "phd":
-        return "PhD Thesis";
-      default:
-        return type;
-    }
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-sky-900 px-4 py-6">

@@ -2,6 +2,7 @@ import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 import { API_BASE, apiRequest } from "@/lib/api";
 import { getUserId } from "@/lib/auth";
+import { docTypeLabel } from "@/lib/documentTypes";
 
 interface JobDetail {
   id: string;
@@ -78,16 +79,6 @@ export default function DocumentViewerPage() {
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
   }
 
-  function docTypeLabel(type: string) {
-    const labels: Record<string, string> = {
-      report: "Student Report",
-      undergraduate: "Undergraduate Thesis",
-      masters: "Masters Thesis",
-      phd: "PhD Thesis",
-      print_ready: "Quick Print Format",
-    };
-    return labels[type] ?? type;
-  }
 
   async function handleDownload() {
     if (!job) return;

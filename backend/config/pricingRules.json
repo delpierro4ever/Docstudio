@@ -2,7 +2,7 @@
   "currency": "XAF",
   "documentTypePricing": {
     "report": {
-      "label": "Student Report",
+      "label": "Report",
       "basePriceCfa": 500
     },
     "undergraduate": {
@@ -18,7 +18,7 @@
       "basePriceCfa": 4000
     },
     "print_ready": {
-      "label": "Quick Print Format",
+      "label": "Quick Format",
       "basePriceCfa": 200
     }
   }

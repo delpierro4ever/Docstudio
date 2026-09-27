@@ -192,6 +192,32 @@ cd frontend && npm run build && npx next start -H 0.0.0.0 -p 3000
 
 Then browse to `http://<server-ip>:3000`. Only port 3000 needs to be reachable. Note that logins are identified by an `x-user-id` header rather than a session token, so this is suitable for testing, not yet for public production use.
 
+### Production (the live server)
+
+The live site is **https://84-247-153-21.sslip.io** (a free hostname for the
+server's IP; swap in a real domain later and re-run certbot).
+
+| Piece | Where |
+|---|---|
+| Code | `/home/admin/apps/docstudio-prod` (a clone of this repo, separate from development) |
+| Data (users, jobs, sessions, feedback, documents) | `/home/admin/docstudio-data/{data,uploads}` |
+| Backups | `/home/admin/docstudio-data/backups` (daily at 02:30, last 14 kept) |
+| Secrets & settings | `/etc/docstudio/{formatter,backend,frontend}.env` (root-only) |
+| Services | `docstudio-formatter`, `docstudio-backend`, `docstudio-frontend` (systemd, start on boot) |
+| Web server | nginx (`deploy/nginx-docstudio.conf`) → Next.js on 127.0.0.1:3000; Let's Encrypt HTTPS, auto-renewed |
+
+Only nginx (80/443) is reachable from outside; everything else listens on
+127.0.0.1. Copies of the unit files, nginx config and scripts are in `deploy/`.
+
+```bash
+/home/admin/apps/docstudio-prod/deploy/deploy.sh      # pull, rebuild, restart
+journalctl -u docstudio-backend -f                    # logs (also -formatter, -frontend)
+sudo systemctl restart docstudio-backend              # restart one service
+```
+
+Feedback and usage: open `/admin` on the site and enter `ADMIN_KEY` from
+`/etc/docstudio/backend.env`.
+
 ### Tests and output inspection
 
 ```bash
@@ -223,6 +249,12 @@ cd ../frontend && npx tsc --noEmit && npm run build
 | `HOST` | `127.0.0.1` | Backend bind address; `0.0.0.0` to expose it directly |
 | `FORMATTER_URL` | `http://localhost:8082` | Formatter-service base URL |
 | `FORMATTER_TIMEOUT_MS` | `300000` | Max time to wait for one formatting job |
+| `DATA_DIR` / `UPLOAD_DIR` | `backend/data`, `backend/uploads` | Where runtime data and documents are stored |
+| `ADMIN_KEY` | — | Enables `/admin` (usage, failures, feedback); disabled when unset |
+| `COOKIE_SECURE` | `false` | Set `true` when served over HTTPS |
+| `BILLING_ENABLED` | `false` | `true` restores the free quota + per-type prices |
+| `DAILY_JOB_LIMIT` | `30` | Documents per user per 24 h (`0` = unlimited) |
+| `MAX_UPLOAD_MB` | `25` | Upload size limit |
 
 ### Environment variables (frontend)
 

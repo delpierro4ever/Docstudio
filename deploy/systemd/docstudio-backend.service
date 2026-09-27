@@ -1,0 +1,14 @@
+[Unit]
+Description=DocStudio backend gateway (Express)
+After=network.target docstudio-formatter.service
+
+[Service]
+User=admin
+WorkingDirectory=/home/admin/apps/docstudio-prod/backend
+EnvironmentFile=/etc/docstudio/backend.env
+ExecStart=/home/admin/.hermes/node/bin/node /home/admin/apps/docstudio-prod/backend/dist/index.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

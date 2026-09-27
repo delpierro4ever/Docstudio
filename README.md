@@ -228,7 +228,7 @@ cd ../frontend && npx tsc --noEmit && npm run build
 
 | Variable | Default | Effect |
 |---|---|---|
-| `BACKEND_URL` | `http://localhost:4000` | Where the `/backend/*` relay forwards to (read at build/start) |
+| `BACKEND_URL` | `http://127.0.0.1:4000` | Where the `/backend/*` relay forwards to (read at **build** time) |
 | `NEXT_PUBLIC_API_BASE` | `/backend` | Base URL the browser uses for API calls; set to call a backend directly |
 
 ---

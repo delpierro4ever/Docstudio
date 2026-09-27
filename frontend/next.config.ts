@@ -4,7 +4,7 @@ import type { NextConfig } from "next";
 // the Express gateway. That way a single public port (3000) serves the
 // whole app, requests are same-origin (no CORS), and the backend and
 // formatter can stay bound to localhost.
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:4000";
+const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:4000";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,

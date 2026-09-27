@@ -12,52 +12,78 @@ export interface PythonFormatterRequest {
 }
 
 /**
+ * Error from the formatter-service. `status` is the HTTP status to send
+ * the client: 422 when the upload itself is unusable (bad DOCX), 502 when
+ * the formatter failed or could not be reached.
+ */
+export class FormatterError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+    this.name = "FormatterError";
+  }
+}
+
+const FORMATTER_URL =
+  (process.env.FORMATTER_URL || "http://localhost:8082").replace(/\/$/, "") +
+  "/format";
+
+// LLM classification can try several models; allow generous time but
+// never hang forever.
+const FORMATTER_TIMEOUT_MS = Number(process.env.FORMATTER_TIMEOUT_MS) || 300_000;
+
+/**
  * Call the Python formatter-service FastAPI endpoint.
- * Returns the formatted DOCX as a Buffer.
+ * Returns the formatted DOCX as a Buffer; throws FormatterError.
  */
 export async function callPythonFormatter(
   params: PythonFormatterRequest
 ): Promise<Buffer> {
   const { filePath, profileId, documentType = "report" } = params;
 
-  // Absolute path check
   const absPath = path.resolve(filePath);
   if (!fs.existsSync(absPath)) {
-    throw new Error(`Input file not found at: ${absPath}`);
+    throw new FormatterError(`Input file not found at: ${absPath}`, 500);
   }
 
-  // Build multipart form
   const form = new FormData();
   form.append("file", fs.createReadStream(absPath));
   form.append("profileId", profileId);
   form.append("documentType", documentType);
 
-  const url = "http://localhost:8082/format"; // must match uvicorn port
-
-  // Call Python formatter API
-  const res = await axios.post(url, form, {
-    headers: form.getHeaders(),
-    responseType: "arraybuffer",
-
-    /**
-     * IMPORTANT:
-     * timeout: 0 means NO TIMEOUT.
-     * Needed because LLM + formatting may run longer than 60s.
-     * We will configure a proper timeout later.
-     */
-    timeout: 0,
-
-    maxContentLength: Infinity,
-    maxBodyLength: Infinity,
-  });
-
-  // Validate response
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(
-      `Python formatter returned HTTP ${res.status}: ${res.statusText}`
+  try {
+    const res = await axios.post(FORMATTER_URL, form, {
+      headers: form.getHeaders(),
+      responseType: "arraybuffer",
+      timeout: FORMATTER_TIMEOUT_MS,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+    return Buffer.from(res.data as ArrayBuffer);
+  } catch (err: any) {
+    if (err?.response) {
+      const detail = extractDetail(err.response.data);
+      const status = err.response.status === 422 ? 422 : 502;
+      throw new FormatterError(
+        detail || `Formatter returned HTTP ${err.response.status}`,
+        status
+      );
+    }
+    if (err?.code === "ECONNABORTED") {
+      throw new FormatterError("Formatting timed out. Please try again.", 504);
+    }
+    throw new FormatterError(
+      `Formatter service unreachable at ${FORMATTER_URL} (${err?.code || err?.message})`,
+      502
     );
   }
+}
 
-  // axios with responseType "arraybuffer" gives raw ArrayBuffer
-  return Buffer.from(res.data as ArrayBuffer);
+function extractDetail(data: unknown): string | undefined {
+  try {
+    const text = Buffer.from(data as ArrayBuffer).toString("utf-8");
+    const parsed = JSON.parse(text);
+    return typeof parsed?.detail === "string" ? parsed.detail : undefined;
+  } catch {
+    return undefined;
+  }
 }

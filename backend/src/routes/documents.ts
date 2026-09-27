@@ -4,13 +4,16 @@ import { Router, Request, Response } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID as uuidv4 } from "crypto";
 
 import { extractPreviewHtml } from "../services/preview";
 
 import { findUserById, saveUser } from "../stores/userStore";
 import { getTextProfiles } from "../config/formattingRules";
-import { callPythonFormatter } from "../services/pythonFormatterClient";
+import {
+  callPythonFormatter,
+  FormatterError,
+} from "../services/pythonFormatterClient";
 import { getPriceForDocumentType } from "../config/pricingRules";
 
 import { Job } from "../models/job";
@@ -19,6 +22,7 @@ import {
   findJobsByUser,
   findJobById,
   findJobsByCenter,
+  updateJob,
 } from "../stores/jobStore";
 
 import { User } from "../models/user";
@@ -32,9 +36,40 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
+const formattedDir = path.join(uploadDir, "formatted");
+
 const upload = multer({
   dest: uploadDir,
 });
+
+/**
+ * Run the formatter for a job and persist the outcome (status, output
+ * path or error) through the job store. Returns the HTTP status to
+ * report on failure, or null on success.
+ */
+async function formatJob(job: Job): Promise<number | null> {
+  try {
+    const formattedBuffer = await callPythonFormatter({
+      filePath: job.inputPath,
+      profileId: job.profileId,
+      documentType: job.documentType,
+    });
+
+    fs.mkdirSync(formattedDir, { recursive: true });
+    const outputPath = path.join(formattedDir, `${job.id}.docx`);
+    fs.writeFileSync(outputPath, formattedBuffer);
+
+    updateJob(job.id, { status: "done", outputPath, errorMessage: undefined });
+    return null;
+  } catch (err: any) {
+    console.error("Error calling Python formatter:", err?.message || err);
+    updateJob(job.id, {
+      status: "error",
+      errorMessage: err?.message || "Formatter error",
+    });
+    return err instanceof FormatterError ? err.status : 500;
+  }
+}
 
 // ------------------------------------------------------
 // POST /documents → upload + format
@@ -43,9 +78,6 @@ router.post(
   "/documents",
   upload.single("file"),
   async (req: Request, res: Response) => {
-     console.log("📥 POST /documents hit!"); // ← ADD THIS
-    console.log("File:", req.file); // ← ADD THIS
-    console.log("Body:", req.body); // ← ADD THIS
     try {
       const userId = req.headers["x-user-id"] as string;
       const user: User | undefined = findUserById(userId);
@@ -111,40 +143,13 @@ router.post(
 
       addJob(job);
 
-      // 2) Call Python formatter
-      let formattedBuffer: Buffer;
-      try {
-        formattedBuffer = await callPythonFormatter({
-          filePath: job.inputPath,
-          profileId: job.profileId,
-          documentType: job.documentType,
-        });
-      } catch (err: any) {
-        console.error("Error calling Python formatter:", err);
-        job.status = "error";
-        job.errorMessage = err?.message || "Formatter error";
-        job.updatedAt = new Date();
-
+      // 2) Format and persist the outcome
+      const failStatus = await formatJob(job);
+      if (failStatus !== null) {
         return res
-          .status(500)
-          .json({ error: "Failed to format document", job });
+          .status(failStatus)
+          .json({ error: job.errorMessage || "Failed to format document", job });
       }
-
-      // 3) Save formatted DOCX
-      const formattedDir = path.join(uploadDir, "formatted");
-      if (!fs.existsSync(formattedDir)) {
-        fs.mkdirSync(formattedDir, { recursive: true });
-      }
-
-      const outputFile = `${job.id}.docx`;
-      const outputPath = path.join(formattedDir, outputFile);
-
-      fs.writeFileSync(outputPath, formattedBuffer);
-
-      // 4) Update job
-      job.outputPath = outputPath;
-      job.status = "done";
-      job.updatedAt = new Date();
 
       // Free credit deduction
       if (job.isFree && user.freeRemaining > 0) {
@@ -292,43 +297,14 @@ router.post(
           .json({ error: "Original file not found for this job" });
       }
 
-      // Mark processing
-      job.status = "processing";
-      job.errorMessage = undefined;
-      job.updatedAt = new Date();
+      updateJob(job.id, { status: "processing", errorMessage: undefined });
 
-      // Call Python formatter again
-      let formattedBuffer: Buffer;
-      try {
-        formattedBuffer = await callPythonFormatter({
-          filePath: job.inputPath,
-          profileId: job.profileId,
-          documentType: job.documentType,
-        });
-      } catch (err: any) {
-        console.error("Error re-running Python formatter:", err);
-        job.status = "error";
-        job.errorMessage = err?.message || "Formatter error";
-        job.updatedAt = new Date();
+      const failStatus = await formatJob(job);
+      if (failStatus !== null) {
         return res
-          .status(500)
-          .json({ error: "Failed to reformat document", job });
+          .status(failStatus)
+          .json({ error: job.errorMessage || "Failed to reformat document", job });
       }
-
-      // Ensure formatted directory exists
-      const formattedDir = path.join(uploadDir, "formatted");
-      if (!fs.existsSync(formattedDir)) {
-        fs.mkdirSync(formattedDir, { recursive: true });
-      }
-
-      const outputFile = `${job.id}.docx`;
-      const outputPath = path.join(formattedDir, outputFile);
-
-      fs.writeFileSync(outputPath, formattedBuffer);
-
-      job.outputPath = outputPath;
-      job.status = "done";
-      job.updatedAt = new Date();
 
       // We do NOT change freeRemaining or priceCfa for reformatting
 

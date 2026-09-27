@@ -18,6 +18,10 @@ function load(): Job[] {
     const parsed = JSON.parse(raw) as any[];
     return parsed.map((j) => ({
       ...j,
+      // A job still "processing" on startup was cut off by a restart
+      ...(j.status === "processing"
+        ? { status: "error", errorMessage: "Interrupted by a server restart. Please reformat." }
+        : {}),
       createdAt: new Date(j.createdAt),
       updatedAt: new Date(j.updatedAt),
     }));

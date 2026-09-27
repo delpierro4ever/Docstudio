@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from formatting.formatter import REPORT, THESIS
 from pipeline.docx_pipeline import InvalidDocumentError, run_pipeline, run_quick_pipeline
@@ -61,13 +62,17 @@ async def format_document(
     #      report                    -> Report (no generated prelim pages)
     #      undergraduate/masters/phd -> Thesis (everything)
     try:
+        # The pipeline is slow, blocking work (parsing, LLM calls); run it in
+        # a worker thread so one document doesn't stall every other request.
         if documentType == "print_ready":
-            output_bytes = run_quick_pipeline(
+            output_bytes = await run_in_threadpool(
+                run_quick_pipeline,
                 input_path=str(temp_path),
                 profile_id=profileId,
             )
         else:
-            output_bytes = run_pipeline(
+            output_bytes = await run_in_threadpool(
+                run_pipeline,
                 input_path=str(temp_path),
                 profile_id=profileId,
                 mode=REPORT if documentType == "report" else THESIS,

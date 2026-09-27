@@ -1,5 +1,6 @@
 # formatter-service/pipeline/docx_pipeline.py
 
+import zipfile
 from io import BytesIO
 from typing import Optional, Dict, Any, List
 
@@ -11,6 +12,37 @@ from formatting.formatter import format_docx
 from formatting.basic_style import apply_basic_style
 from formatting.field_updater import enable_update_fields_on_open
 from formatting.section_builder import add_arabic_page_numbers
+
+
+class InvalidDocumentError(ValueError):
+    """The upload is not a DOCX we can read (corrupt, wrong format, empty)."""
+
+
+def load_document(input_path: str):
+    """
+    Open a DOCX, turning every "this isn't a readable DOCX" failure into
+    InvalidDocumentError so the API can answer 422 instead of 500.
+    """
+    if not zipfile.is_zipfile(input_path):
+        raise InvalidDocumentError(
+            "The uploaded file is not a valid .docx document "
+            "(legacy .doc, PDF, and corrupted files are not supported)."
+        )
+    try:
+        with zipfile.ZipFile(input_path) as zf:
+            names = set(zf.namelist())
+            if "word/document.xml" not in names:
+                raise InvalidDocumentError(
+                    "The uploaded file is a ZIP archive but not a Word document."
+                )
+            bad = zf.testzip()
+            if bad is not None:
+                raise InvalidDocumentError(f"The .docx archive is corrupted ({bad}).")
+        return Document(input_path)
+    except InvalidDocumentError:
+        raise
+    except Exception as exc:
+        raise InvalidDocumentError(f"The .docx file could not be read: {exc}") from exc
 
 
 def run_quick_pipeline(
@@ -25,7 +57,7 @@ def run_quick_pipeline(
     styles, and simple Arabic page numbering.
     """
     profile = load_profile(profile_id)
-    doc = Document(input_path)
+    doc = load_document(input_path)
 
     try:
         apply_basic_style(doc, profile, metadata=None)
@@ -67,14 +99,15 @@ def run_pipeline(
     """
 
     # 1) Parse DOCX into blocks
+    load_document(input_path)
     parser = DOCXBlockParser(input_path)
     blocks: List[Dict[str, Any]] = parser.parse()
 
-    if not blocks:
-        # For safety – you can customize this behavior
-        raise ValueError("No blocks were extracted from the input DOCX.")
+    if not any((b.get("text") or "").strip() for b in blocks if b.get("type") == "paragraph"):
+        raise InvalidDocumentError("The document contains no text to format.")
 
-    # 2) LLM classification (roles, sections, headings, tables, figures, refs)
+    # 2) Classification (roles, sections, headings, tables, figures, refs).
+    #    Falls back to the rule-based classifier if the LLM is unavailable.
     llm = LLMClassifier()
     classification_metadata: Dict[str, Any] = llm.classify_document_blocks(blocks)
 

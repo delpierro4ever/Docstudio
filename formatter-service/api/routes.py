@@ -1,13 +1,14 @@
 # formatter-service/api/routes.py
 
 import os
+import traceback
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
 
-from pipeline.docx_pipeline import run_pipeline, run_quick_pipeline
+from pipeline.docx_pipeline import InvalidDocumentError, run_pipeline, run_quick_pipeline
 
 router = APIRouter()
 
@@ -50,6 +51,10 @@ async def format_document(
             detail=f"Failed to save uploaded file: {e}",
         )
 
+    if not contents:
+        temp_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="The uploaded file is empty.")
+
     # 2) Run pipeline — quick (print-ready) or full
     try:
         if documentType == "print_ready":
@@ -62,12 +67,13 @@ async def format_document(
                 input_path=str(temp_path),
                 profile_id=profileId,
             )
+    except InvalidDocumentError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except FileNotFoundError:
         # Shouldn't happen, but just in case
         raise HTTPException(status_code=404, detail="Input file not found")
     except Exception as e:
-        # Keep temp file for debugging if needed
-        # You can also log the error here
+        traceback.print_exc()
         raise HTTPException(
             status_code=500,
             detail=f"Formatter error: {e}",

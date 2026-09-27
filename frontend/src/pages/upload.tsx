@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { getUserId } from "@/lib/auth";
-import { API_BASE } from "@/lib/api";
+import { apiFetch, errorMessage } from "@/lib/api";
 import { Category, CATEGORY_DOC_TYPE, THESIS_LEVELS } from "@/lib/documentTypes";
 
 interface TextProfile {
@@ -17,8 +17,6 @@ interface CreateJobResponse {
     documentType: string;
     profileId: string;
     status: string;
-    isFree: boolean;
-    priceCfa?: number;
     createdAt: string;
     updatedAt: string;
   };
@@ -114,7 +112,7 @@ export default function UploadPage() {
     async function loadProfiles() {
       try {
         setLoadingProfiles(true);
-        const res = await fetch(`${API_BASE}/profiles`);
+        const res = await apiFetch("/profiles");
         const data = await res.json();
         setProfiles(data);
         if (data.length > 0) setProfileId(data[0].id);
@@ -131,8 +129,7 @@ export default function UploadPage() {
     e.preventDefault();
     setError(null);
 
-    const uid = getUserId();
-    if (!uid) { router.push("/login"); return; }
+    if (!getUserId()) { router.push("/login"); return; }
 
     if (!file) { setError("Please select a .docx file."); return; }
     if (!profileId) { setError("No formatting profile selected."); return; }
@@ -147,15 +144,13 @@ export default function UploadPage() {
       formData.append("documentType", finalDocType);
       formData.append("profileId", profileId);
 
-      const res = await fetch(`${API_BASE}/documents`, {
+      const res = await apiFetch("/documents", {
         method: "POST",
-        headers: { "x-user-id": uid },
         body: formData,
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(body?.error || "Failed to format document. Please try again.");
+        setError(await errorMessage(res, "Failed to format document. Please try again."));
         return;
       }
 

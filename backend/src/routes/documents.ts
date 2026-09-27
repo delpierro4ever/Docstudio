@@ -1,46 +1,96 @@
 // backend/src/routes/documents.ts
 
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { randomUUID as uuidv4 } from "crypto";
 
-import { extractPreviewHtml } from "../services/preview";
-
-import { findUserById, saveUser } from "../stores/userStore";
 import { getTextProfiles } from "../config/formattingRules";
 import {
   callPythonFormatter,
   FormatterError,
 } from "../services/pythonFormatterClient";
 import { getPriceForDocumentType } from "../config/pricingRules";
+import { billingEnabled, dailyJobLimit, maxUploadBytes } from "../config/limits";
+import { requireUser } from "../middleware/auth";
+import { UPLOAD_DIR } from "../config/paths";
 
-import { Job } from "../models/job";
+import { DocumentType, Job } from "../models/job";
+import { User } from "../models/user";
 import {
   addJob,
   findJobsByUser,
   findJobById,
-  findJobsByCenter,
   updateJob,
 } from "../stores/jobStore";
-
-import { User } from "../models/user";
+import { saveUser } from "../stores/userStore";
 
 const router = Router();
 
-// Where uploads go
-const uploadDir = path.join(__dirname, "..", "..", "uploads");
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
+const uploadDir = UPLOAD_DIR;
 const formattedDir = path.join(uploadDir, "formatted");
+fs.mkdirSync(formattedDir, { recursive: true });
+
+const DOCUMENT_TYPES: DocumentType[] = ["report", "undergraduate", "masters", "phd", "print_ready"];
 
 const upload = multer({
   dest: uploadDir,
+  limits: { fileSize: maxUploadBytes(), files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (path.extname(file.originalname).toLowerCase() !== ".docx") {
+      return cb(new Error("Only Word .docx files are supported."));
+    }
+    cb(null, true);
+  },
 });
+
+/** multer as middleware, turning its errors into 400/413 JSON. */
+function uploadSingleDocx(req: Request, res: Response, next: NextFunction) {
+  upload.single("file")(req, res, (err: unknown) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+      const mb = Math.round(maxUploadBytes() / (1024 * 1024));
+      return res.status(413).json({ error: `File is too large (maximum ${mb} MB).` });
+    }
+    return res.status(400).json({ error: (err as Error).message || "Upload failed" });
+  });
+}
+
+/** The job fields safe to send to the browser (no server file paths). */
+function publicJob(job: Job) {
+  return {
+    id: job.id,
+    documentType: job.documentType,
+    profileId: job.profileId,
+    originalName: job.originalName || null,
+    status: job.status,
+    errorMessage: job.errorMessage || null,
+    isFree: job.isFree,
+    priceCfa: job.priceCfa,
+    centerId: job.centerId || null,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+}
+
+function downloadName(job: Job): string {
+  const base = job.originalName
+    ? path.basename(job.originalName, path.extname(job.originalName))
+    : `${job.documentType}-${job.id}`;
+  return `${base} (formatted).docx`;
+}
+
+/** The signed-in user's job, or an error response already sent. */
+function ownJob(req: Request, res: Response): Job | undefined {
+  const user: User = res.locals.user;
+  const job = findJobById(req.params.id);
+  if (!job || job.userId !== user.id) {
+    res.status(404).json({ error: "Document not found" });
+    return undefined;
+  }
+  return job;
+}
 
 /**
  * Run the formatter for a job and persist the outcome (status, output
@@ -55,14 +105,13 @@ async function formatJob(job: Job): Promise<number | null> {
       documentType: job.documentType,
     });
 
-    fs.mkdirSync(formattedDir, { recursive: true });
     const outputPath = path.join(formattedDir, `${job.id}.docx`);
     fs.writeFileSync(outputPath, formattedBuffer);
 
     updateJob(job.id, { status: "done", outputPath, errorMessage: undefined });
     return null;
   } catch (err: any) {
-    console.error("Error calling Python formatter:", err?.message || err);
+    console.error(`Formatter failed for job ${job.id}:`, err?.message || err);
     updateJob(job.id, {
       status: "error",
       errorMessage: err?.message || "Formatter error",
@@ -76,61 +125,63 @@ async function formatJob(job: Job): Promise<number | null> {
 // ------------------------------------------------------
 router.post(
   "/documents",
-  upload.single("file"),
+  requireUser,
+  uploadSingleDocx,
   async (req: Request, res: Response) => {
+    const user: User = res.locals.user;
+    const discardUpload = () => req.file && fs.rm(req.file.path, { force: true }, () => {});
     try {
-      const userId = req.headers["x-user-id"] as string;
-      const user: User | undefined = findUserById(userId);
-
-      if (!user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
 
       const { profileId, documentType } = req.body;
 
-      // Validate profileId
-      const profiles = getTextProfiles();
-      const profile = profiles.find((p) => p.id === profileId);
-      if (!profile) {
+      if (!getTextProfiles().some((p) => p.id === profileId)) {
+        discardUpload();
         return res.status(400).json({ error: "Invalid profileId" });
       }
 
-      // Validate documentType
-      const allowedTypes = ["report", "undergraduate", "masters", "phd", "print_ready"];
-      if (!documentType || !allowedTypes.includes(documentType)) {
+      if (!DOCUMENT_TYPES.includes(documentType)) {
+        discardUpload();
         return res.status(400).json({
-          error:
-            "Invalid documentType. Use one of: report, undergraduate, masters, phd, print_ready",
+          error: `Invalid documentType. Use one of: ${DOCUMENT_TYPES.join(", ")}`,
         });
       }
 
-      const isFree = user.freeRemaining > 0;
-
-      // Compute price based on document type (for now, flat per type)
-      let priceCfa: number | undefined = undefined;
-
-      if (!isFree) {
-        const pricing = getPriceForDocumentType(documentType);
-        if (!pricing) {
-          return res.status(400).json({
-            error: `No pricing configured for documentType: ${documentType}`,
-          });
-        }
-        priceCfa = pricing.basePriceCfa;
-      } else {
-        priceCfa = 0;
+      const limit = dailyJobLimit();
+      const since = Date.now() - 24 * 60 * 60 * 1000;
+      const recent = findJobsByUser(user.id).filter((j) => j.createdAt.getTime() > since);
+      if (limit > 0 && recent.length >= limit) {
+        discardUpload();
+        return res.status(429).json({
+          error: `You have reached the limit of ${limit} documents per day. Please try again tomorrow.`,
+        });
       }
 
-      // 1) Create job
+      // Pricing. With billing off (testing period) every document is free.
+      let isFree = true;
+      let priceCfa = 0;
+      if (billingEnabled()) {
+        isFree = user.freeRemaining > 0;
+        if (!isFree) {
+          const pricing = getPriceForDocumentType(documentType);
+          if (!pricing) {
+            discardUpload();
+            return res.status(400).json({
+              error: `No pricing configured for documentType: ${documentType}`,
+            });
+          }
+          priceCfa = pricing.basePriceCfa;
+        }
+      }
+
       const job: Job = {
         id: uuidv4(),
         userId: user.id,
         profileId,
         documentType,
+        originalName: req.file.originalname,
         status: "processing",
         inputPath: req.file.path,
         outputPath: undefined,
@@ -143,25 +194,20 @@ router.post(
 
       addJob(job);
 
-      // 2) Format and persist the outcome
       const failStatus = await formatJob(job);
       if (failStatus !== null) {
         return res
           .status(failStatus)
-          .json({ error: job.errorMessage || "Failed to format document", job });
+          .json({ error: job.errorMessage || "Failed to format document", job: publicJob(job) });
       }
 
-      // Free credit deduction
-      if (job.isFree && user.freeRemaining > 0) {
+      if (billingEnabled() && job.isFree && user.freeRemaining > 0) {
         user.freeRemaining -= 1;
         user.updatedAt = new Date();
         saveUser(user);
       }
 
-      return res.status(201).json({
-        message: "Job created",
-        job,
-      });
+      return res.status(201).json({ message: "Job created", job: publicJob(job) });
     } catch (error) {
       console.error("Error creating job:", error);
       return res.status(500).json({ error: "Internal server error" });
@@ -170,193 +216,68 @@ router.post(
 );
 
 // ------------------------------------------------------
-// GET /documents → list user jobs
+// GET /documents → list the signed-in user's jobs
 // ------------------------------------------------------
-router.get("/documents", (req: Request, res: Response) => {
-  try {
-    const userId = req.headers["x-user-id"] as string;
-
-    if (!userId) {
-      return res.status(401).json({ error: "Missing x-user-id header" });
-    }
-
-    const jobs = findJobsByUser(userId);
-
-    const response = jobs.map((job) => ({
-      id: job.id,
-      documentType: job.documentType,
-      profileId: job.profileId,
-      status: job.status,
-      isFree: job.isFree,
-      priceCfa: job.priceCfa,
-      centerId: job.centerId || null,
-      createdAt: job.createdAt,
-      updatedAt: job.updatedAt,
-    }));
-
-    return res.json(response);
-  } catch (error) {
-    console.error("Error listing jobs:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+router.get("/documents", requireUser, (_req: Request, res: Response) => {
+  const user: User = res.locals.user;
+  const jobs = findJobsByUser(user.id)
+    .slice()
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return res.json(jobs.map(publicJob));
 });
 
 // ------------------------------------------------------
-// GET /documents/:id → detailed job info
+// GET /documents/:id → job details
 // ------------------------------------------------------
-router.get("/documents/:id", (req: Request, res: Response) => {
-  try {
-    const userId = req.headers["x-user-id"] as string;
-    const jobId = req.params.id;
-
-    const job = findJobById(jobId);
-    if (!job) {
-      return res.status(404).json({ error: "Job not found" });
-    }
-
-    if (job.userId !== userId) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
-    return res.json(job);
-  } catch (error) {
-    console.error("Error getting job:", error);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+router.get("/documents/:id", requireUser, (req: Request, res: Response) => {
+  const job = ownJob(req, res);
+  if (!job) return;
+  return res.json(publicJob(job));
 });
 
 // ------------------------------------------------------
-// GET /documents/:id/preview → HTML preview from original docx
+// POST /documents/:id/reformat → re-run the formatter
 // ------------------------------------------------------
-router.get(
-  "/documents/:id/preview",
-  async (req: Request, res: Response) => {
-    try {
-      const userId = req.headers["x-user-id"] as string;
-      const jobId = req.params.id;
-
-      const user = findUserById(userId);
-      if (!user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const job = findJobById(jobId);
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-
-      if (job.userId !== user.id) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-
-      if (!job.inputPath || !fs.existsSync(job.inputPath)) {
-        return res
-          .status(404)
-          .json({ error: "Original file not found for this job" });
-      }
-
-      const previewHtml = await extractPreviewHtml(job.inputPath);
-
-      return res.json({
-        previewHtml: previewHtml ?? null,
-      });
-    } catch (error) {
-      console.error("Error generating preview:", error);
-      return res.status(500).json({ error: "Internal server error" });
-    }
-  }
-);
-
-// ------------------------------------------------------
-// POST /documents/:id/reformat → re-run Python formatter
-// ------------------------------------------------------
-router.post(
-  "/documents/:id/reformat",
-  async (req: Request, res: Response) => {
-    try {
-      const userId = req.headers["x-user-id"] as string;
-      const jobId = req.params.id;
-
-      const user = findUserById(userId);
-      if (!user) {
-        return res.status(401).json({ error: "User not authenticated" });
-      }
-
-      const job = findJobById(jobId);
-      if (!job) {
-        return res.status(404).json({ error: "Job not found" });
-      }
-
-      if (job.userId !== user.id) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-
-      if (!job.inputPath || !fs.existsSync(job.inputPath)) {
-        return res
-          .status(404)
-          .json({ error: "Original file not found for this job" });
-      }
-
-      updateJob(job.id, { status: "processing", errorMessage: undefined });
-
-      const failStatus = await formatJob(job);
-      if (failStatus !== null) {
-        return res
-          .status(failStatus)
-          .json({ error: job.errorMessage || "Failed to reformat document", job });
-      }
-
-      // We do NOT change freeRemaining or priceCfa for reformatting
-
-      return res.json({
-        message: "Document reformatted successfully",
-        job,
-      });
-    } catch (error) {
-      console.error("Error reformatting job:", error);
-      return res.status(500).json({ error: "Internal server error" });
-    }
-  }
-);
-
-// ------------------------------------------------------
-// GET /documents/:id/download → download formatted docx
-// ------------------------------------------------------
-router.get("/documents/:id/download", (req: Request, res: Response) => {
+router.post("/documents/:id/reformat", requireUser, async (req: Request, res: Response) => {
   try {
-    const userId = req.headers["x-user-id"] as string;
-    const jobId = req.params.id;
+    const job = ownJob(req, res);
+    if (!job) return;
 
-    const user = findUserById(userId);
-    if (!user) {
-      return res.status(401).json({ error: "User not authenticated" });
+    if (!job.inputPath || !fs.existsSync(job.inputPath)) {
+      return res.status(404).json({ error: "Original file not found for this document" });
     }
 
-    const job = findJobById(jobId);
-    if (!job) {
-      return res.status(404).json({ error: "Job not found" });
-    }
+    updateJob(job.id, { status: "processing", errorMessage: undefined });
 
-    if (job.userId !== user.id) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
-    if (job.status !== "done" || !job.outputPath) {
+    const failStatus = await formatJob(job);
+    if (failStatus !== null) {
       return res
-        .status(400)
-        .json({ error: "Job not completed or no output file" });
+        .status(failStatus)
+        .json({ error: job.errorMessage || "Failed to reformat document", job: publicJob(job) });
     }
 
-    if (!fs.existsSync(job.outputPath)) {
-      return res.status(404).json({ error: "Formatted file not found" });
-    }
-
-    const downloadName = `${job.documentType}-${job.id}.docx`;
-    return res.download(job.outputPath, downloadName);
+    // Reformatting is never charged again
+    return res.json({ message: "Document reformatted successfully", job: publicJob(job) });
   } catch (error) {
-    console.error("Error downloading file:", error);
+    console.error("Error reformatting job:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// ------------------------------------------------------
+// GET /documents/:id/download → formatted docx
+// ------------------------------------------------------
+router.get("/documents/:id/download", requireUser, (req: Request, res: Response) => {
+  const job = ownJob(req, res);
+  if (!job) return;
+
+  if (job.status !== "done" || !job.outputPath) {
+    return res.status(400).json({ error: "This document is not ready yet" });
+  }
+  if (!fs.existsSync(job.outputPath)) {
+    return res.status(404).json({ error: "Formatted file not found" });
+  }
+  return res.download(job.outputPath, downloadName(job));
 });
 
 export default router;

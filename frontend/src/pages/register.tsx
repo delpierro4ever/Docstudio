@@ -45,8 +45,7 @@ export default function RegisterPage() {
       saveUserId(res.id);
       router.push("/dashboard");
     } catch (err) {
-      console.error(err);
-      setError("Registration failed. Email or phone may already exist.");
+      setError(err instanceof Error && err.message ? err.message : "Registration failed. Email or phone may already exist.");
     } finally {
       setLoading(false);
     }
@@ -82,9 +81,9 @@ export default function RegisterPage() {
             </p>
 
             <ul className="text-xs text-slate-200/80 space-y-1 mt-4">
-              <li>• Free quota for new accounts</li>
-              <li>• Works with student reports and theses</li>
-              <li>• Coming soon: automatic TOC & chapters</li>
+              <li>• Free while we test: tell us what works</li>
+              <li>• Theses, reports, or a quick layout fix</li>
+              <li>• Automatic table of contents & page numbers</li>
             </ul>
           </div>
 

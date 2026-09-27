@@ -10,6 +10,8 @@ export interface Job {
 
   status: JobStatus;
 
+  originalName?: string;   // file name as uploaded
+
   inputPath: string;
   outputPath?: string;
 

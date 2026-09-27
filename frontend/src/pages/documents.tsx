@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { API_BASE, apiRequest } from "@/lib/api";
+import { apiRequest, downloadUrl } from "@/lib/api";
 import { getUserId } from "@/lib/auth";
 import Link from "next/link";
 import { docTypeLabel } from "@/lib/documentTypes";
@@ -9,9 +9,8 @@ interface JobListItem {
   id: string;
   documentType: string;
   profileId: string;
+  originalName: string | null;
   status: string;
-  isFree: boolean;
-  centerId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -21,7 +20,6 @@ export default function DocumentsPage() {
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getUserId()) {
@@ -31,15 +29,9 @@ export default function DocumentsPage() {
   }, [router]);
 
   useEffect(() => {
-    const uid = getUserId();
-
     async function loadJobs() {
       try {
-        const res = await apiRequest<JobListItem[]>("/documents", {
-          headers: {
-            "x-user-id": uid || "",
-          },
-        });
+        const res = await apiRequest<JobListItem[]>("/documents");
         setJobs(res);
       } catch (err) {
         console.error(err);
@@ -56,45 +48,6 @@ export default function DocumentsPage() {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
     return d.toLocaleString();
-  }
-
-  async function handleDownload(jobId: string, documentType: string) {
-    const uid = getUserId();
-    if (!uid) {
-      router.push("/login");
-      return;
-    }
-
-    try {
-      setDownloadingId(jobId);
-      setError("");
-
-      const res = await fetch(`${API_BASE}/documents/${jobId}/download`, {
-        headers: { "x-user-id": uid },
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        console.error("Download error:", text);
-        setError("Failed to download file.");
-        return;
-      }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `${documentType}-${jobId}.docx`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error(err);
-      setError("Failed to download file.");
-    } finally {
-      setTimeout(() => setDownloadingId(null), 1000);
-    }
   }
 
   function statusBadge(status: string) {
@@ -203,27 +156,11 @@ export default function DocumentsPage() {
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-slate-900/70 border-b border-slate-700/80">
-                    <th className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
-                      Job ID
-                    </th>
-                    <th className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
-                      Document Type
-                    </th>
-                    <th className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
-                      Profile
-                    </th>
-                    <th className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
-                      Status
-                    </th>
-                    <th className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
-                      Free?
-                    </th>
-                    <th className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
-                      Created
-                    </th>
-                    <th className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
-                      Actions
-                    </th>
+                    {["Document", "Type", "Status", "Created", "Actions"].map((h) => (
+                      <th key={h} className="border border-slate-700/80 px-3 py-2 text-left text-xs text-slate-200">
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -236,35 +173,15 @@ export default function DocumentsPage() {
                         } hover:bg-slate-800/60`}
                     >
                       <td className="border border-slate-800/80 px-3 py-2 align-top">
-                        <span className="font-mono text-[11px] text-slate-200 break-all">
-                          {job.id}
+                        <span className="text-xs text-slate-50 break-all">
+                          {job.originalName || `Document ${job.id.slice(0, 8)}`}
                         </span>
                       </td>
                       <td className="border border-slate-800/80 px-3 py-2 align-top">
-                        <p className="text-xs text-slate-50">
-                          {docTypeLabel(job.documentType)}
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          {job.documentType}
-                        </p>
-                      </td>
-                      <td className="border border-slate-800/80 px-3 py-2 align-top">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-100 text-[11px] border border-slate-500/40">
-                          {job.profileId}
-                        </span>
+                        <span className="text-xs text-slate-50">{docTypeLabel(job.documentType)}</span>
                       </td>
                       <td className="border border-slate-800/80 px-3 py-2 align-top">
                         {statusBadge(job.status)}
-                      </td>
-                      <td className="border border-slate-800/80 px-3 py-2 align-top">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] border border-slate-500/40 ${job.isFree
-                            ? "bg-emerald-500/10 text-emerald-200"
-                            : "bg-slate-500/10 text-slate-200"
-                            }`}
-                        >
-                          {job.isFree ? "Free" : "Paid"}
-                        </span>
                       </td>
                       <td className="border border-slate-800/80 px-3 py-2 align-top">
                         <span className="text-[11px] text-slate-200">
@@ -281,22 +198,19 @@ export default function DocumentsPage() {
                           </Link>
 
                           {job.status === "done" ? (
-                            <button
-                              onClick={() => handleDownload(job.id, job.documentType)}
-                              className="text-xs text-sky-300 hover:text-sky-200 underline disabled:opacity-60 text-left"
-                              disabled={downloadingId === job.id}
+                            <a
+                              href={downloadUrl(job.id)}
+                              className="text-xs text-sky-300 hover:text-sky-200 underline"
                             >
-                              {downloadingId === job.id
-                                ? "Downloading..."
-                                : "Download"}
-                            </button>
+                              Download
+                            </a>
                           ) : job.status === "processing" ? (
                             <span className="text-[11px] text-slate-300">
                               Processing…
                             </span>
                           ) : job.status === "error" ? (
                             <span className="text-[11px] text-red-300">
-                              Error – reupload
+                              Failed – see details
                             </span>
                           ) : (
                             <span className="text-[11px] text-slate-300">

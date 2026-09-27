@@ -39,8 +39,7 @@ export default function LoginPage() {
       saveUserId(res.id);
       router.push("/dashboard");
     } catch (err: unknown) {
-      console.error(err);
-      setError("Invalid email/phone or password.");
+      setError(err instanceof Error && err.message ? err.message : "Invalid email/phone or password.");
     } finally {
       setLoading(false);
     }
@@ -76,9 +75,9 @@ export default function LoginPage() {
             </p>
 
             <ul className="text-xs text-slate-200/80 space-y-1 mt-4">
-              <li>• Automatic formatting profile (UB standard)</li>
-              <li>• Basic justification & spacing already in place</li>
-              <li>• Free quota for first documents</li>
+              <li>• University of Buea formatting profiles</li>
+              <li>• Grammar, headings, captions & page numbers</li>
+              <li>• Free while we test: tell us what works</li>
             </ul>
           </div>
 

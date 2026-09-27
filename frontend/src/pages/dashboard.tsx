@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { apiRequest } from "@/lib/api";
 import { getUserId, logout } from "@/lib/auth";
+import FeedbackForm from "@/components/FeedbackForm";
 
 interface MeResponse {
   id: string;
@@ -10,7 +11,6 @@ interface MeResponse {
   phone: string;
   role: string;
   centerId: string | null;
-  freeRemaining: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,19 +27,14 @@ export default function DashboardPage() {
       return;
     }
 
-    apiRequest<MeResponse>("/auth/me", {
-      headers: { "x-user-id": uid },
-    })
+    apiRequest<MeResponse>("/auth/me")
       .then(setUser)
-      .catch(() => {
-        logout();
-        router.push("/login");
-      })
+      .catch(() => router.push("/login"))
       .finally(() => setLoading(false));
   }, [router]);
 
-  function handleLogout() {
-    logout();
+  async function handleLogout() {
+    await logout();
     router.push("/login");
   }
 
@@ -50,8 +45,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  const isCenterAdmin = user.role === "center-admin";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-sky-900 px-4 py-6">
@@ -103,48 +96,17 @@ export default function DashboardPage() {
             </div>
 
             <div className="text-right">
-              <span className="inline-flex items-center px-3 py-1 rounded-full bg-sky-500/20 text-sky-100 text-xs border border-sky-500/40">
-                {isCenterAdmin ? "Documentation Center Admin" : "Individual User"}
+              <span className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-100 text-xs border border-emerald-500/40">
+                Free testing period
               </span>
             </div>
           </div>
 
-          {/* Stats row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <div className="bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-3">
-              <p className="text-xs text-slate-400 mb-1">
-                Free documents remaining
-              </p>
-              <p className="text-3xl font-semibold text-sky-300">
-                {user.freeRemaining}
-              </p>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Once these are used, pricing per document applies.
-              </p>
-            </div>
-
-            <div className="bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-3">
-              <p className="text-xs text-slate-400 mb-1">Account type</p>
-              <p className="text-lg font-semibold text-slate-100 capitalize">
-                {user.role.replace("-", " ")}
-              </p>
-              <p className="text-[11px] text-slate-400 mt-1">
-                {isCenterAdmin
-                  ? "You can upload and track jobs for your documentation center."
-                  : "You can upgrade to a documentation center at any time."}
-              </p>
-            </div>
-
-            <div className="bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-3">
-              <p className="text-xs text-slate-400 mb-1">Quick info</p>
-              <p className="text-sm text-slate-100">
-                Profile: <span className="font-medium">UB Standard</span>
-              </p>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Basic formatting (justification & spacing) is active. Advanced
-                formatting options will roll out in future versions.
-              </p>
-            </div>
+          {/* Testing notice */}
+          <div className="mb-8 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-100">
+            DocStudio is <span className="font-semibold">free</span> while we test it. Format as many documents
+            as you need and tell us what works and what doesn&apos;t using the feedback form below
+            or on each document&apos;s page.
           </div>
 
           {/* Actions */}
@@ -176,7 +138,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-sm font-semibold mb-1">My Documents</p>
                 <p className="text-xs text-slate-200/80">
-                  View all the documents you've formatted and download the
+                  View all the documents you&apos;ve formatted and download the
                   final versions ready for printing.
                 </p>
               </div>
@@ -185,44 +147,28 @@ export default function DashboardPage() {
               </p>
             </button>
 
-            {/* Center / Upgrade */}
-            {isCenterAdmin ? (
-              <button
-                onClick={() => router.push("/center")}
-                className="group bg-purple-600 hover:bg-purple-700 text-white rounded-xl px-4 py-4 text-left flex flex-col justify-between transition"
-              >
-                <div>
-                  <p className="text-sm font-semibold mb-1">
-                    Documentation Center Panel
-                  </p>
-                  <p className="text-xs text-purple-50/90">
-                    Track all jobs processed through your center and monitor
-                    usage.
-                  </p>
-                </div>
-                <p className="mt-3 text-xs font-medium text-purple-50 group-hover:underline">
-                  Open center dashboard →
+            {/* Feedback */}
+            <a
+              href="#feedback"
+              className="group bg-slate-900/70 hover:bg-slate-800 text-slate-50 rounded-xl px-4 py-4 text-left flex flex-col justify-between border border-slate-700 transition"
+            >
+              <div>
+                <p className="text-sm font-semibold mb-1">Send Feedback</p>
+                <p className="text-xs text-slate-200/80">
+                  Found a problem or have an idea? Tell us. We read every message.
                 </p>
-              </button>
-            ) : (
-              <button
-                onClick={() => router.push("/center")}
-                className="group bg-slate-900/70 hover:bg-slate-800 text-slate-50 rounded-xl px-4 py-4 text-left flex flex-col justify-between border border-slate-700 transition"
-              >
-                <div>
-                  <p className="text-sm font-semibold mb-1">
-                    Become a Documentation Center
-                  </p>
-                  <p className="text-xs text-slate-200/80">
-                    Register your documentation center and format documents on
-                    behalf of students.
-                  </p>
-                </div>
-                <p className="mt-3 text-xs font-medium text-slate-100 group-hover:underline">
-                  Setup center profile →
-                </p>
-              </button>
-            )}
+              </div>
+              <p className="mt-3 text-xs font-medium text-slate-100 group-hover:underline">
+                Write feedback →
+              </p>
+            </a>
+          </div>
+
+          <div id="feedback" className="mt-8 scroll-mt-6">
+            <FeedbackForm
+              title="Tell us what you think"
+              prompt="General feedback about DocStudio: problems, ideas, or what you'd pay for later."
+            />
           </div>
         </div>
       </div>

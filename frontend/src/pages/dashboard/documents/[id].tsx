@@ -1,21 +1,17 @@
 import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
-import { API_BASE, apiRequest } from "@/lib/api";
+import { apiRequest, downloadUrl } from "@/lib/api";
 import { getUserId } from "@/lib/auth";
 import { docTypeLabel } from "@/lib/documentTypes";
+import FeedbackForm from "@/components/FeedbackForm";
 
 interface JobDetail {
   id: string;
-  userId: string;
   profileId: string;
   documentType: string;
+  originalName: string | null;
   status: string;
-  inputPath?: string;
-  outputPath?: string;
-  errorMessage?: string;
-  isFree: boolean;
-  priceCfa?: number;
-  centerId?: string | null;
+  errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -27,7 +23,6 @@ export default function DocumentViewerPage() {
   const [job, setJob] = useState<JobDetail | null>(null);
   const [loadingJob, setLoadingJob] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
   const [reformatting, setReformatting] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -38,32 +33,24 @@ export default function DocumentViewerPage() {
 
   // Load job details
   useEffect(() => {
-    if (!id) return;
-    const uid = getUserId();
-    if (!uid) return;
+    if (!id || !getUserId()) return;
 
     const jobId = Array.isArray(id) ? id[0] : id;
 
-    apiRequest<JobDetail>(`/documents/${jobId}`, {
-      headers: { "x-user-id": uid },
-    })
+    apiRequest<JobDetail>(`/documents/${jobId}`)
       .then(setJob)
-      .catch(() => setError("Failed to load document details."))
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load document details."))
       .finally(() => setLoadingJob(false));
   }, [id]);
 
   // Poll while processing
   useEffect(() => {
     if (!id || !job || job.status !== "processing") return;
-    const uid = getUserId();
-    if (!uid) return;
     const jobId = Array.isArray(id) ? id[0] : id;
 
     const interval = setInterval(async () => {
       try {
-        const data = await apiRequest<JobDetail>(`/documents/${jobId}`, {
-          headers: { "x-user-id": uid },
-        });
+        const data = await apiRequest<JobDetail>(`/documents/${jobId}`);
         setJob(data);
         if (data.status !== "processing") clearInterval(interval);
       } catch {
@@ -80,62 +67,21 @@ export default function DocumentViewerPage() {
   }
 
 
-  async function handleDownload() {
-    if (!job) return;
-    const uid = getUserId();
-    if (!uid) { router.push("/login"); return; }
-
-    try {
-      setDownloading(true);
-      setError(null);
-
-      const res = await fetch(`${API_BASE}/documents/${job.id}/download`, {
-        headers: { "x-user-id": uid },
-      });
-
-      if (!res.ok) {
-        setError("Failed to download file.");
-        return;
-      }
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `${job.documentType}-${job.id}.docx`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      setError("Failed to download file.");
-    } finally {
-      setTimeout(() => setDownloading(false), 1000);
-    }
-  }
-
   async function handleReformat() {
     if (!job) return;
-    const uid = getUserId();
-    if (!uid) { router.push("/login"); return; }
 
     try {
       setReformatting(true);
       setError(null);
       setInfo(null);
 
-      const res = await fetch(`${API_BASE}/documents/${job.id}/reformat`, {
+      const data = await apiRequest<{ job: JobDetail }>(`/documents/${job.id}/reformat`, {
         method: "POST",
-        headers: { "x-user-id": uid },
       });
-
-      if (!res.ok) { setError("Failed to reformat document."); return; }
-
-      const data = await res.json();
       setJob(data.job);
       setInfo("Reformatted successfully. Download the latest version below.");
-    } catch {
-      setError("Failed to reformat document.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reformat document.");
     } finally {
       setReformatting(false);
     }
@@ -188,8 +134,10 @@ export default function DocumentViewerPage() {
         {/* Card */}
         <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl shadow-xl p-6 md:p-8 text-slate-100">
 
-          <h2 className="text-2xl font-semibold mb-1">{docTypeLabel(job.documentType)}</h2>
-          <p className="text-[11px] text-slate-400 font-mono mb-6 break-all">Job ID: {job.id}</p>
+          <h2 className="text-2xl font-semibold mb-1 break-words">
+            {job.originalName || docTypeLabel(job.documentType)}
+          </h2>
+          <p className="text-xs text-slate-400 mb-6">{docTypeLabel(job.documentType)}</p>
 
           {/* Details */}
           <div className="grid grid-cols-2 gap-3 text-xs text-slate-300 mb-6">
@@ -206,28 +154,31 @@ export default function DocumentViewerPage() {
               <p className="text-slate-50">{formatDate(job.createdAt)}</p>
             </div>
             <div>
-              <p className="text-slate-500 mb-0.5">Billing</p>
-              <p className="text-slate-50">
-                {job.isFree ? "Free document" : `Paid · ${job.priceCfa ?? 0} FCFA`}
-              </p>
+              <p className="text-slate-500 mb-0.5">Reference</p>
+              <p className="text-slate-50 font-mono">{job.id.slice(0, 8)}</p>
             </div>
           </div>
 
-          {job.errorMessage && (
-            <p className="text-red-300 text-xs mb-4">Error: {job.errorMessage}</p>
+          {job.status === "error" && job.errorMessage && (
+            <p className="text-red-300 text-xs mb-4">Formatting failed: {job.errorMessage}</p>
           )}
           {error && <p className="text-red-400 text-xs mb-4">{error}</p>}
           {info && <p className="text-emerald-300 text-xs mb-4">{info}</p>}
 
           {/* Primary action */}
           {job.status === "done" ? (
-            <button
-              onClick={handleDownload}
-              disabled={downloading}
-              className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-medium py-3 rounded-lg text-sm disabled:opacity-60 transition mb-3"
-            >
-              {downloading ? "Downloading…" : "Download formatted document"}
-            </button>
+            <>
+              <a
+                href={downloadUrl(job.id)}
+                className="block w-full text-center bg-emerald-500 hover:bg-emerald-600 text-black font-medium py-3 rounded-lg text-sm transition mb-2"
+              >
+                Download formatted document
+              </a>
+              <p className="text-[11px] text-slate-400 mb-4">
+                Tip: open it in Microsoft Word. If Word asks to update fields, choose <b>Yes</b> so the
+                page numbers and table of contents fill in.
+              </p>
+            </>
           ) : (
             <div className="w-full bg-slate-800 text-slate-400 text-center py-3 rounded-lg text-sm mb-3">
               {job.status === "processing" ? "Still processing…" : "Not ready for download"}
@@ -262,6 +213,12 @@ export default function DocumentViewerPage() {
               Go to dashboard
             </button>
           </div>
+
+          {(job.status === "done" || job.status === "error") && (
+            <div className="mt-6">
+              <FeedbackForm jobId={job.id} />
+            </div>
+          )}
 
         </div>
       </div>

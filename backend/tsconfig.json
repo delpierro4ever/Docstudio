@@ -10,8 +10,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
-    "rootDir": ".",
+    "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src/**/*", "TS/**/*", "src/config/formattingRules.ts"]
+  "include": ["src/**/*"]
 }

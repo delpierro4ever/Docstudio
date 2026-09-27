@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { User } from "../models/user";
 
-const DATA_DIR = path.join(__dirname, "..", "..", "data");
+import { DATA_DIR } from "../config/paths";
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 
 // Ensure data directory exists
@@ -64,4 +64,8 @@ export function addUser(user: User): User {
 
 export function saveUser(user: User): void {
   save(users);
+}
+
+export function allUsers(): User[] {
+  return users;
 }

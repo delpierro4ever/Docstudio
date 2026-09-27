@@ -16,16 +16,20 @@ import {
 const COOKIE_NAME = "ds_session";
 
 // Set COOKIE_SECURE=true when the site is served over HTTPS.
-const SECURE = process.env.COOKIE_SECURE === "true";
+export const SECURE = process.env.COOKIE_SECURE === "true";
 
-function readSessionToken(req: Request): string | undefined {
+export function readCookie(req: Request, cookieName: string): string | undefined {
   const header = req.headers.cookie;
   if (!header) return undefined;
   for (const part of header.split(";")) {
     const [name, ...rest] = part.trim().split("=");
-    if (name === COOKIE_NAME) return decodeURIComponent(rest.join("="));
+    if (name === cookieName) return decodeURIComponent(rest.join("="));
   }
   return undefined;
+}
+
+function readSessionToken(req: Request): string | undefined {
+  return readCookie(req, COOKIE_NAME);
 }
 
 export function currentUser(req: Request): User | undefined {

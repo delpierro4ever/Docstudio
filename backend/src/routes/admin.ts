@@ -42,8 +42,8 @@ router.get("/admin/overview", requireAdmin, (_req: Request, res: Response) => {
   const feedback = allFeedback();
   const userById = new Map(users.map((u) => [u.id, u]));
   const jobById = new Map(jobs.map((j) => [j.id, j]));
-  const who = (userId: string) => {
-    const u = userById.get(userId);
+  const who = (userId: string | undefined) => {
+    const u = userId ? userById.get(userId) : undefined;
     return u ? { name: u.fullName, email: u.email, phone: u.phone } : null;
   };
   const day = (d: Date) => d.toISOString().slice(0, 10);

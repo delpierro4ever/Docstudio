@@ -13,6 +13,7 @@ interface LoginResponse {
   freeRemaining: number;
   createdAt: string;
   updatedAt: string;
+  claimedJobIds?: string[];   // documents formatted before signing in ("try it")
 }
 
 export default function LoginPage() {
@@ -37,7 +38,8 @@ export default function LoginPage() {
       });
 
       saveUserId(res.id);
-      router.push("/dashboard");
+      const claimed = res.claimedJobIds?.[0];
+      router.push(claimed ? `/dashboard/documents/${claimed}?claimed=1` : "/dashboard");
     } catch (err: unknown) {
       setError(err instanceof Error && err.message ? err.message : "Invalid email/phone or password.");
     } finally {
@@ -92,7 +94,9 @@ export default function LoginPage() {
             Welcome back
           </h2>
           <p className="text-sm text-slate-500 mb-6">
-            Login with your email or phone number to access your documents.
+            {router.query.from === "try"
+              ? "Log in and the document you just formatted will be added to your account."
+              : "Login with your email or phone number to access your documents."}
           </p>
 
           {error && (

@@ -91,6 +91,15 @@ Auth uses server sessions. Register/login set a random session token in an `Http
 
 Because the browser sends the cookie automatically, downloads are plain `<a href>` links.
 
+### Try before signing up (guest trial)
+
+Visitors can format a document at `/try` without an account. They see preview images of up to 5 pages (the opening pages, the start of Chapter One, and the first page with a numbered caption) and must register or log in to download the `.docx`. Register and login move the visitor's trial jobs into the account (`claimedJobIds` in the response) and the frontend opens that document.
+
+- The visitor is identified by a random `ds_guest` HttpOnly cookie; jobs store only its SHA-256 (`guestId`).
+- Limits: `GUEST_DAILY_LIMIT` per IP address (default 2) and `GUEST_GLOBAL_DAILY_LIMIT` overall (default 100) per 24 hours. `GUEST_TRIAL_ENABLED=false` turns trials off.
+- Unclaimed trials (upload, output, previews and job record) are deleted after `GUEST_RETENTION_HOURS` (default 48).
+- Previews are rendered by `backend/scripts/render_preview.py` with the system `python3` (`PREVIEW_PYTHON`) and a headless LibreOffice. It refreshes the TOC, List of Tables/Figures and page-number fields before exporting, because they only fill in when a document is opened. Server packages: `libreoffice-writer-nogui python3-uno poppler-utils fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea`.
+
 ### backend (Express + TypeScript, port 4000)
 
 The backend is a thin gateway. Its jobs:

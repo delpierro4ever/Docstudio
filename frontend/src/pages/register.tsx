@@ -13,6 +13,7 @@ interface RegisterResponse {
   createdAt: string;
   updatedAt: string;
   freeRemaining: number;
+  claimedJobIds?: string[];   // documents formatted before signing in ("try it")
 }
 
 export default function RegisterPage() {
@@ -43,7 +44,8 @@ export default function RegisterPage() {
       });
 
       saveUserId(res.id);
-      router.push("/dashboard");
+      const claimed = res.claimedJobIds?.[0];
+      router.push(claimed ? `/dashboard/documents/${claimed}?claimed=1` : "/dashboard");
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : "Registration failed. Email or phone may already exist.");
     } finally {
@@ -98,7 +100,9 @@ export default function RegisterPage() {
             Create Account
           </h2>
           <p className="text-sm text-slate-500 mb-6">
-            Enter your details to get started.
+            {router.query.from === "try"
+              ? "Your formatted document will be saved to your new account, ready to download."
+              : "Enter your details to get started."}
           </p>
 
           {error && (

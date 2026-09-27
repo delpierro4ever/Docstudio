@@ -12,6 +12,7 @@ import {
   findUserByPhone,
 } from "../stores/userStore";
 import { currentUser, signIn, signOut } from "../middleware/auth";
+import { claimGuestJobs } from "./guest";
 
 
 const router = Router();
@@ -100,8 +101,9 @@ router.post("/register", async (req: Request, res: Response) => {
 
     addUser(newUser);
     signIn(res, newUser);
+    const claimedJobIds = claimGuestJobs(req, res, newUser);
 
-    return res.status(201).json(publicUser(newUser));
+    return res.status(201).json({ ...publicUser(newUser), claimedJobIds });
   } catch (error) {
     console.error("Error in /auth/register:", error);
     return res.status(500).json({ error: "Internal server error" });
@@ -141,7 +143,8 @@ router.post("/login", async (req: Request, res: Response) => {
 
     failures.delete(throttleKey);
     signIn(res, user);
-    return res.json(publicUser(user));
+    const claimedJobIds = claimGuestJobs(req, res, user);
+    return res.json({ ...publicUser(user), claimedJobIds });
   } catch (error) {
     console.error("Error in /auth/login:", error);
     return res.status(500).json({ error: "Internal server error" });

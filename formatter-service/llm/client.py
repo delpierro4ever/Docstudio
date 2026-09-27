@@ -12,6 +12,15 @@ from .heuristic_classifier import classify_blocks_heuristically
 
 load_dotenv()
 
+# OpenRouter model ids, tried in order. LLM_MODEL (if set) goes first.
+DEFAULT_MODEL = "openai/gpt-4o-mini"
+FALLBACK_MODELS = ["openai/gpt-4.1-mini", "openai/gpt-4.1-nano"]
+
+
+def models_to_try(primary: Optional[str] = None) -> List[str]:
+    primary = primary or os.getenv("LLM_MODEL") or DEFAULT_MODEL
+    return list(dict.fromkeys([primary, DEFAULT_MODEL, *FALLBACK_MODELS]))
+
 
 class LLMClassifier:
     """
@@ -33,15 +42,7 @@ class LLMClassifier:
             "LLM_API_URL",
             "https://openrouter.ai/api/v1/chat/completions",
         )
-        # Primary model (can be env override)
-        primary_model = model or os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast:free")
-
-        # Fallback models (optional; you can tweak this list)
-        self.models_to_try: List[str] = list(dict.fromkeys([
-            primary_model,
-            "openai/gpt-4o-mini",
-            "openai/gpt-4.1-nano",
-        ]))
+        self.models_to_try: List[str] = models_to_try(model)
 
         self.prompt_builder = LLMPromptBuilder()
 

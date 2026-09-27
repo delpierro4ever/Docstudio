@@ -20,6 +20,7 @@ from typing import Any, Dict, List
 import requests
 from dotenv import load_dotenv
 
+from .client import models_to_try
 from .schema_validator import parse_llm_json
 
 load_dotenv()
@@ -58,12 +59,7 @@ class Proofreader:
             "LLM_API_URL",
             "https://openrouter.ai/api/v1/chat/completions",
         )
-        primary_model = os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast:free")
-        self.models_to_try: List[str] = [
-            primary_model,
-            "google/gemini-3-pro-preview",
-            "kwaipilot/kat-coder-pro:free",
-        ]
+        self.models_to_try: List[str] = models_to_try()
 
     def correct_texts(self, texts: Dict[str, str]) -> Dict[str, str]:
         """

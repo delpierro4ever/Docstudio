@@ -183,7 +183,7 @@ cd ../frontend && npx tsc --noEmit && npm run build
 | Variable | Default | Effect |
 |---|---|---|
 | `OPENROUTER_API_KEY` | — | Enables LLM classification; without it the heuristic classifier is used |
-| `LLM_MODEL` | `x-ai/grok-4.1-fast:free` | Primary OpenRouter model (then `openai/gpt-4o-mini`, `openai/gpt-4.1-nano`) |
+| `LLM_MODEL` | `openai/gpt-4o-mini` | Primary OpenRouter model for classification and proofreading (then `openai/gpt-4.1-mini`, `openai/gpt-4.1-nano`) |
 | `LLM_TIMEOUT_SECONDS` | `60` | Per-model request timeout |
 | `DOCSTUDIO_BAKE_FIELDS` | `1` | Bake TOC/SEQ results via headless LibreOffice when installed; `0` to skip |
 | `DOCSTUDIO_PROOFREAD` | `1` | LLM grammar/spelling pass (only runs with an API key); `0` to disable |
@@ -222,6 +222,6 @@ backend/
 
 **Add a new formatting profile:** Add an entry to `backend/config/formattingRules.json` (the profile schema is defined in `formatter-service/config/profiles.py`). The new profile will appear automatically in the upload form's profile dropdown.
 
-**Change the LLM:** Set `LLM_MODEL` in `formatter-service/.env` to any model available on OpenRouter. The classifier's prompt is in `formatter-service/llm/client.py`.
+**Change the LLM:** Set `LLM_MODEL` in `formatter-service/.env` to any model available on OpenRouter. The classifier's prompt is in `formatter-service/llm/prompt_builder.py`; the model list is in `formatter-service/llm/client.py`.
 
 **Add a new prelim page type:** Add a key to `_GENERATED_PRELIM_ITEMS` in `formatting/formatter.py`, add the insertion logic in the loop, and add the key to the profile's `structure.order` array.

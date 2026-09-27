@@ -1,4 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
 <title>DocStudio</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="/favicon.ico">
 <meta name="description" content="Upload your thesis or report as a .docx and download a submission-ready document: correct fonts, spacing, headings, captions, table of contents and page numbers.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -28,7 +34,9 @@
   }
 
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
+    margin: 0; min-height: 100vh;
     background: var(--bg) linear-gradient(135deg, #020617 0%, #0f172a 45%, #0c4a6e 100%) fixed; color: var(--ink);
     font: 400 17px/1.6 var(--body);
     padding-inline: clamp(16px, 4vw, 40px);
@@ -63,7 +71,9 @@
   .nav-links a:not(.btn) { text-decoration: none; color: var(--ink-2); }
   .nav-links a:not(.btn):hover { color: var(--ink); }
   .nav-links .btn { padding: 11px 18px; font-size: 15px; }
-  @media (max-width: 760px) { .nav-links a:not(.btn) { display: none; } }
+  .nav-links .login { text-decoration: none; color: var(--ink); font-weight: 500; }
+  .nav-links .login:hover { color: var(--green); }
+  @media (max-width: 760px) { .nav-links a:not(.btn):not(.login) { display: none; } .nav-links { gap: 16px; } }
 
   /* hero */
   .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: clamp(32px, 5vw, 72px); align-items: center; padding-block: clamp(32px, 6vw, 72px) clamp(56px, 8vw, 96px); }
@@ -196,6 +206,9 @@
   .final-cta p { color: var(--ink-2); font-size: 18px; }
   footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding-block: 28px; border-top: 1px solid var(--rule); font-size: 14px; color: var(--ink-3); }
 </style>
+</head>
+<body>
+
 
 <div class="wrap">
   <nav>
@@ -204,7 +217,8 @@
       <a href="#how">How it works</a>
       <a href="#pricing">Pricing</a>
       <a href="#business">For businesses</a>
-      <a class="btn" href="https://84-247-153-21.sslip.io/try">Get started</a>
+      <a class="login" id="nav-account" href="/login">Log in</a>
+      <a class="btn" href="/try">Get started</a>
     </div>
   </nav>
 
@@ -214,7 +228,7 @@
       <h1 style="margin-top:18px">Write the content. <em>We'll fix the formatting.</em></h1>
       <p class="lede">Upload your draft as a Word file. Download a submission-ready document with the right fonts, spacing, headings, captions, table of contents and page numbers.</p>
       <div class="hero-cta">
-        <a class="btn" href="https://84-247-153-21.sslip.io/try">Try it with your document
+        <a class="btn" href="/try">Try it with your document
           <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11m-4-5 5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </a>
         <a class="btn btn-ghost" href="#how">See how it works</a>
@@ -345,7 +359,7 @@
           <li>No more fixing the table of contents the night before</li>
           <li>Pay a few hundred francs instead of paying someone to retype it</li>
         </ul>
-        <a class="btn" href="https://84-247-153-21.sslip.io/try">Format my document</a>
+        <a class="btn" href="/try">Format my document</a>
       </div>
       <div class="aud biz">
         <p class="eyebrow" style="color:var(--green);opacity:1">Businesses</p>
@@ -356,7 +370,7 @@
           <li>Consistent, professional results on every job</li>
           <li>Keep a history of every job you've formatted and download again anytime</li>
         </ul>
-        <a class="btn btn-ghost" href="https://84-247-153-21.sslip.io/try">Start formatting for customers</a>
+        <a class="btn btn-ghost" href="/try">Start formatting for customers</a>
       </div>
     </div>
   </section>
@@ -404,7 +418,7 @@
   <div class="final-cta">
     <h2>Your next submission, <em>formatted right</em>.</h2>
     <p>Upload your document and see the result before you create an account.</p>
-    <a class="btn" href="https://84-247-153-21.sslip.io/try">Get started
+    <a class="btn" href="/try">Get started
       <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11m-4-5 5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </a>
   </div>
@@ -414,3 +428,16 @@
     <span>Made in Buea, Cameroon</span>
   </footer>
 </div>
+
+<script>
+  // Signed-in visitors (the app keeps their id as a hint) go to their dashboard.
+  try {
+    if (localStorage.getItem("userId")) {
+      var a = document.getElementById("nav-account");
+      a.textContent = "My dashboard";
+      a.href = "/dashboard";
+    }
+  } catch (e) {}
+</script>
+</body>
+</html>

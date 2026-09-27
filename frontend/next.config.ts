@@ -9,7 +9,11 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:4000";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   async rewrites() {
-    return [{ source: "/backend/:path*", destination: `${BACKEND_URL}/:path*` }];
+    return {
+      // The home page is the static marketing page in public/landing.html.
+      beforeFiles: [{ source: "/", destination: "/landing.html" }],
+      afterFiles: [{ source: "/backend/:path*", destination: `${BACKEND_URL}/:path*` }],
+    };
   },
   experimental: {
     // Formatting (LLM classification + proofreading) can outlast the 30s

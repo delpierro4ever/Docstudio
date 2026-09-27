@@ -80,7 +80,8 @@ FastAPI formatter-service (:8082)
 ### frontend (Next.js, port 3000)
 
 Pages:
-- `/` — redirects to `/dashboard` if logged in, else `/login`
+- `/` — the marketing landing page (`public/landing.html`, served by a rewrite in `next.config.ts`)
+- `/try` — format a document without an account and preview it (see "Try before signing up")
 - `/login`, `/register` — email/password auth; the server sets a session cookie
 - `/dashboard` — shows user info and quick actions
 - `/upload` — mode-selection screen (Full vs Quick), then file + profile form

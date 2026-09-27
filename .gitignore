@@ -66,3 +66,6 @@ backend/data/
 *.png
 verify_*.mjs
 verify_*.js
+
+# Formatter-service scratch uploads
+formatter-service/storage/

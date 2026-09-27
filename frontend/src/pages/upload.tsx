@@ -95,7 +95,8 @@ export default function UploadPage() {
       });
 
       if (!res.ok) {
-        setError("Failed to format document. Please try again.");
+        const body = await res.json().catch(() => null);
+        setError(body?.error || "Failed to format document. Please try again.");
         return;
       }
 

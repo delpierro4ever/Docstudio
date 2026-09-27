@@ -1,7 +1,9 @@
 # formatter-service/llm/schema_validator.py
 
 import json
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
+_VALID_SECTIONS = {"prelim", "main"}
 
 
 def clean_llm_json_text(raw: str) -> str:
@@ -20,45 +22,90 @@ def clean_llm_json_text(raw: str) -> str:
     return text.strip()
 
 
-def parse_llm_json(raw: str) -> Dict[str, Any]:
+def parse_llm_json(raw: Optional[str]) -> Dict[str, Any]:
     """
-    Clean + parse JSON from LLM.
-    Raises ValueError if parsing fails.
+    Clean + parse JSON from LLM. Tolerates markdown fences and prose
+    around the object by falling back to the outermost {...} span.
+    Raises ValueError if no JSON object can be recovered.
     """
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError("LLM returned an empty response")
+
     cleaned = clean_llm_json_text(raw)
-    return json.loads(cleaned)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start == -1 or end <= start:
+            raise ValueError("LLM response contains no JSON object")
+        try:
+            data = json.loads(cleaned[start:end + 1])
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"LLM response is not valid JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"LLM JSON must be an object, got {type(data).__name__}")
+    return data
 
 
 def normalize_classification(
     data: Dict[str, Any],
     blocks: List[Dict[str, Any]],
+    fallback: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Ensure 'blocks' and 'sections' objects exist
-    and that each known block id has at least a default classification.
+    Make LLM output safe for the formatter:
+      - 'blocks' and 'sections' objects exist
+      - entries for unknown block ids or of the wrong type are dropped
+      - every known block id has a classification, taken from `fallback`
+        (heuristic metadata) when given, else body_paragraph/main
+      - prelim_ends_before_block_id names a real paragraph, else the
+        fallback's boundary is used
+
+    Raises ValueError when the answer is unusable (no valid block entries).
     """
-    if "blocks" not in data or not isinstance(data["blocks"], dict):
-        data["blocks"] = {}
+    fallback = fallback or {}
+    fb_blocks: Dict[str, Any] = fallback.get("blocks", {}) or {}
+    known_ids = {b.get("id") for b in blocks if b.get("id")}
+    paragraph_ids = {b.get("id") for b in blocks if b.get("type") == "paragraph"}
 
-    if "sections" not in data or not isinstance(data["sections"], dict):
-        data["sections"] = {}
+    raw_blocks = data.get("blocks")
+    if not isinstance(raw_blocks, dict):
+        raise ValueError("LLM JSON has no 'blocks' object")
 
-    if "prelim_ends_before_block_id" not in data["sections"]:
-        data["sections"]["prelim_ends_before_block_id"] = None
+    classified: Dict[str, Any] = {}
+    for block_id, meta in raw_blocks.items():
+        if block_id not in known_ids or not isinstance(meta, dict):
+            continue
+        if not isinstance(meta.get("role"), str):
+            continue
+        if meta.get("section") not in _VALID_SECTIONS:
+            meta.pop("section", None)
+        classified[block_id] = meta
 
-    classified_blocks = data["blocks"]
+    if not classified:
+        raise ValueError("LLM JSON classified none of the document's blocks")
 
-    # Fill defaults for any missing block ids
     for block in blocks:
         block_id = block.get("id")
         if not block_id:
             continue
+        default = fb_blocks.get(block_id) or {"role": "body_paragraph", "section": "main"}
+        if block_id not in classified:
+            classified[block_id] = dict(default)
+        elif "section" not in classified[block_id]:
+            classified[block_id]["section"] = default.get("section", "main")
 
-        if block_id not in classified_blocks:
-            # Default classification: body_paragraph, section unknown → assume "main"
-            classified_blocks[block_id] = {
-                "role": "body_paragraph",
-                "section": "main",
-            }
+    sections = data.get("sections")
+    if not isinstance(sections, dict):
+        sections = {}
+    boundary = sections.get("prelim_ends_before_block_id")
+    if boundary not in paragraph_ids:
+        boundary = (fallback.get("sections", {}) or {}).get("prelim_ends_before_block_id")
+    sections["prelim_ends_before_block_id"] = boundary
 
+    data["blocks"] = classified
+    data["sections"] = sections
+    if not isinstance(data.get("structure"), dict) or not data["structure"]:
+        data["structure"] = fallback.get("structure", {}) or {}
     return data

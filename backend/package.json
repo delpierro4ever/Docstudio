@@ -21,8 +21,7 @@
     "form-data": "^4.0.5",
     "mammoth": "^1.11.0",
     "multer": "^2.0.2",
-    "node-fetch": "^2.7.0",
-    "uuid": "^8.3.2"
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
@@ -30,7 +29,6 @@
     "@types/express": "^5.0.5",
     "@types/multer": "^2.0.0",
     "@types/node": "^24.10.1",
-    "@types/uuid": "^11.0.0",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
   }

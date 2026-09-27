@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from .prompt_builder import LLMPromptBuilder
 from .schema_validator import parse_llm_json, normalize_classification
+from .heuristic_classifier import classify_blocks_heuristically
 
 load_dotenv()
 
@@ -15,7 +16,9 @@ load_dotenv()
 class LLMClassifier:
     """
     Wraps the LLM call for block classification.
-    Uses OpenRouter by default.
+    Uses OpenRouter by default. Never raises: with no API key, when every
+    model fails, or when no model returns usable JSON, the rule-based
+    heuristic classifier's result is returned instead.
     """
 
     def __init__(
@@ -25,8 +28,6 @@ class LLMClassifier:
         model: Optional[str] = None,
     ):
         self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-        if not self.api_key:
-            raise ValueError("OPENROUTER_API_KEY is not set in environment or passed explicitly.")
 
         self.api_url = api_url or os.getenv(
             "LLM_API_URL",
@@ -36,11 +37,11 @@ class LLMClassifier:
         primary_model = model or os.getenv("LLM_MODEL", "x-ai/grok-4.1-fast:free")
 
         # Fallback models (optional; you can tweak this list)
-        self.models_to_try: List[str] = [
+        self.models_to_try: List[str] = list(dict.fromkeys([
             primary_model,
             "openai/gpt-4o-mini",
             "openai/gpt-4.1-nano",
-        ]
+        ]))
 
         self.prompt_builder = LLMPromptBuilder()
 
@@ -51,6 +52,12 @@ class LLMClassifier:
         """
         Main entrypoint: takes blocks[], returns classification JSON.
         """
+        heuristic = classify_blocks_heuristically(blocks)
+
+        if not self.api_key:
+            print("[INFO] OPENROUTER_API_KEY not set; using heuristic classifier")
+            return heuristic
+
         print("🤖 Starting LLM classification...")
 
         system_prompt = self.prompt_builder.build_system_prompt()
@@ -66,18 +73,17 @@ class LLMClassifier:
                 )
 
                 data = parse_llm_json(result_text)
-                normalized = normalize_classification(data, blocks)
+                normalized = normalize_classification(data, blocks, fallback=heuristic)
+                normalized["classifier"] = f"llm:{model_name}"
                 print("🎯 LLM classification completed successfully")
                 return normalized
 
             except Exception as e:
                 print(f"❌ Model {model_name} failed: {e}")
-                # Move to next model in the list
                 continue
 
-        # If all models fail, raise or fallback.
-        # For now, raise an error so we see it clearly.
-        raise RuntimeError("All LLM models failed to classify document blocks.")
+        print("[WARN] All LLM models failed; using heuristic classifier")
+        return heuristic
 
     def _call_llm(
         self,
@@ -108,10 +114,13 @@ class LLMClassifier:
         }
 
         print("📡 Sending request to LLM API...")
-        resp = requests.post(self.api_url, json=payload, headers=headers, timeout=60)
+        resp = requests.post(self.api_url, json=payload, headers=headers, timeout=float(os.getenv("LLM_TIMEOUT_SECONDS", "60")))
         resp.raise_for_status()
 
         data = resp.json()
-        content = data["choices"][0]["message"]["content"]
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(f"Unexpected LLM response shape: {exc}") from exc
         print("✅ Received response from LLM")
         return content

@@ -4,7 +4,7 @@ import fs from "fs";
 import path from "path";
 import { Job } from "../models/job";
 
-const DATA_DIR = path.join(__dirname, "..", "..", "data");
+import { DATA_DIR } from "../config/paths";
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 
 if (!fs.existsSync(DATA_DIR)) {
@@ -65,4 +65,8 @@ export function updateJob(id: string, data: Partial<Job>): Job | undefined {
 
 export function findJobsByCenter(centerId: string): Job[] {
   return jobs.filter((j) => j.centerId === centerId);
+}
+
+export function allJobs(): Job[] {
+  return jobs;
 }

@@ -10,11 +10,45 @@ import {
   findUserByIdentifier,
   findUserByEmail,
   findUserByPhone,
-  findUserById,
 } from "../stores/userStore";
+import { currentUser, signIn, signOut } from "../middleware/auth";
 
 
 const router = Router();
+
+/** The user fields safe to send to the browser. */
+function publicUser(user: User) {
+  return {
+    id: user.id,
+    fullName: user.fullName,
+    email: user.email,
+    phone: user.phone,
+    role: user.role,
+    centerId: user.centerId || null,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+}
+
+// Failed-login throttle: at most MAX_FAILURES per identifier+IP per window.
+const MAX_FAILURES = 10;
+const FAILURE_WINDOW_MS = 15 * 60 * 1000;
+const failures = new Map<string, { count: number; resetAt: number }>();
+
+function tooManyFailures(key: string): boolean {
+  const entry = failures.get(key);
+  if (!entry || entry.resetAt <= Date.now()) return false;
+  return entry.count >= MAX_FAILURES;
+}
+
+function recordFailure(key: string): void {
+  const entry = failures.get(key);
+  if (!entry || entry.resetAt <= Date.now()) {
+    failures.set(key, { count: 1, resetAt: Date.now() + FAILURE_WINDOW_MS });
+  } else {
+    entry.count += 1;
+  }
+}
 
 /**
  * POST /auth/register
@@ -28,6 +62,13 @@ router.post("/register", async (req: Request, res: Response) => {
       return res
         .status(400)
         .json({ error: "fullName, email, phone and password are required" });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email))) {
+      return res.status(400).json({ error: "Please enter a valid email address" });
+    }
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
     }
 
     // Check if email or phone already exists
@@ -58,18 +99,9 @@ router.post("/register", async (req: Request, res: Response) => {
     };
 
     addUser(newUser);
+    signIn(res, newUser);
 
-    return res.status(201).json({
-      id: newUser.id,
-      fullName: newUser.fullName,
-      email: newUser.email,
-      phone: newUser.phone,
-      role: newUser.role,
-      centerId: newUser.centerId || null,
-      freeRemaining: newUser.freeRemaining,
-      createdAt: newUser.createdAt,
-      updatedAt: newUser.updatedAt,
-    });
+    return res.status(201).json(publicUser(newUser));
   } catch (error) {
     console.error("Error in /auth/register:", error);
     return res.status(500).json({ error: "Internal server error" });
@@ -93,27 +125,23 @@ router.post("/login", async (req: Request, res: Response) => {
         .json({ error: "identifier/email/phone and password are required" });
     }
 
+    const throttleKey = `${String(loginId).toLowerCase()}|${req.ip}`;
+    if (tooManyFailures(throttleKey)) {
+      return res
+        .status(429)
+        .json({ error: "Too many failed attempts. Please wait 15 minutes and try again." });
+    }
+
     const user = findUserByIdentifier(loginId);
-    if (!user) {
+    const passwordMatch = user ? await bcrypt.compare(password, user.passwordHash) : false;
+    if (!user || !passwordMatch) {
+      recordFailure(throttleKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    const passwordMatch = await bcrypt.compare(password, user.passwordHash);
-    if (!passwordMatch) {
-      return res.status(401).json({ error: "Invalid credentials" });
-    }
-
-    return res.json({
-      id: user.id,
-      fullName: user.fullName,
-      email: user.email,
-      phone: user.phone,
-      role: user.role,
-      centerId: user.centerId || null,
-      freeRemaining: user.freeRemaining,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
-    });
+    failures.delete(throttleKey);
+    signIn(res, user);
+    return res.json(publicUser(user));
   } catch (error) {
     console.error("Error in /auth/login:", error);
     return res.status(500).json({ error: "Internal server error" });
@@ -121,33 +149,22 @@ router.post("/login", async (req: Request, res: Response) => {
 });
 
 /**
- * GET /auth/me
- * Header: x-user-id
+ * GET /auth/me — the signed-in user (session cookie)
  */
 router.get("/me", (req: Request, res: Response) => {
-  const userId = req.headers["x-user-id"] as string;
-
-  if (!userId) {
-    return res.status(401).json({ error: "Missing x-user-id header" });
-  }
-
-  const user = findUserById(userId);
+  const user = currentUser(req);
   if (!user) {
-    return res.status(404).json({ error: "User not found" });
+    return res.status(401).json({ error: "Not signed in" });
   }
-
-  return res.json({
-    id: user.id,
-    fullName: user.fullName,
-    email: user.email,
-    phone: user.phone,
-    role: user.role,
-    centerId: user.centerId || null,
-    freeRemaining: user.freeRemaining,
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-  });
+  return res.json(publicUser(user));
 });
 
+/**
+ * POST /auth/logout — end the current session
+ */
+router.post("/logout", (req: Request, res: Response) => {
+  signOut(req, res);
+  return res.status(204).end();
+});
 
 export default router;

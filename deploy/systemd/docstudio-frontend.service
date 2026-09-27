@@ -1,0 +1,14 @@
+[Unit]
+Description=DocStudio frontend (Next.js)
+After=network.target docstudio-backend.service
+
+[Service]
+User=admin
+WorkingDirectory=/home/admin/apps/docstudio-prod/frontend
+EnvironmentFile=/etc/docstudio/frontend.env
+ExecStart=/home/admin/.hermes/node/bin/node /home/admin/apps/docstudio-prod/frontend/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

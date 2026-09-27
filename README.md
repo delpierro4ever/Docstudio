@@ -12,25 +12,40 @@ The system is built to handle real student documents, which means messy input: i
 
 ---
 
-## Two formatting modes
+## Three formatting categories
 
-### Full Thesis Format
-For theses and formal academic reports. Runs the complete pipeline:
-- LLM classifies the document structure (sections, headings, tables, figures, references)
+| | **Thesis** | **Report** | **Quick Format** |
+|---|---|---|---|
+| `documentType` | `undergraduate` / `masters` / `phd` | `report` | `print_ready` |
+| Price (FCFA) | 1500 / 2500 / 4000 | 500 | 200 |
+| Font, spacing, margins, heading styles | ✓ | ✓ | ✓ |
+| Structure classification (LLM or heuristic) | ✓ | ✓ | – |
+| Grammar & spelling corrections (LLM) | ✓ | ✓ | – |
+| Table/figure captions with `SEQ` numbering | ✓ | ✓ | – |
+| Table of Contents, List of Tables/Figures, Abbreviations | ✓ | – | – |
+| Page numbers | Roman (i, ii) prelims, Arabic from 1 at Chapter 1 | Arabic 1, 2, 3… | Arabic 1, 2, 3… |
+
+In every category the footer is replaced by a single, bare page number:
+existing footer text and fields such as "Page X of Y" are removed.
+
+### Thesis
+For undergraduate, masters and PhD theses. Runs the complete pipeline:
+- Classifies the document structure (sections, headings, tables, figures, references)
 - Generates all required preliminary pages: Table of Contents, List of Tables, List of Figures, List of Abbreviations
 - Normalises table and figure captions with real Word `SEQ` fields so numbering (Table 2.3, Figure 1.1) stays correct when content moves
 - Applies section breaks — roman numerals (i, ii, iii) for prelims, Arabic restarting at 1 for main content
 - Applies the chosen formatting profile (font, spacing, margins, heading styles)
 
-### Quick Print Format
-For reports that just need to look clean before printing. Skips the LLM entirely and skips all preliminary pages. Applies only:
+### Report
+For reports that need clean formatting and corrections but no preliminary pages. Same engine as Thesis, but no generated TOC/lists and simple Arabic numbering from page 1.
+
+### Quick Format
+For documents that just need to look clean before printing. Skips the LLM entirely (text is never changed) and applies only:
 - Font family and size
 - Line spacing and paragraph style
 - Page margins
 - Heading styles
 - Simple Arabic page numbering
-
-This mode is significantly faster and cheaper (200 FCFA vs 500+ for full format) because there is no LLM call.
 
 ---
 
@@ -66,20 +81,20 @@ FastAPI formatter-service (:8082)
 
 Pages:
 - `/` — redirects to `/dashboard` if logged in, else `/login`
-- `/login`, `/register` — email/password auth, stores `userId` in localStorage
+- `/login`, `/register` — email/password auth; the server sets a session cookie
 - `/dashboard` — shows user info and quick actions
 - `/upload` — mode-selection screen (Full vs Quick), then file + profile form
 - `/documents` — list of the user's past jobs with download links
 - `/dashboard/documents/[id]` — job detail page with download button
 
-Auth is localStorage-based. Every API request sends `x-user-id` as a custom header. The backend validates this against its user store. There are no JWTs or sessions — this is intentional for simplicity at this stage.
+Auth uses server sessions. Register/login set a random session token in an `HttpOnly; SameSite=Lax` cookie (`Secure` when `COOKIE_SECURE=true`), valid for 30 days; the backend stores only its SHA-256 hash (`data/sessions.json`) and resolves the user from it on every request. `/auth/logout` ends the session. Scripts cannot read the cookie; `localStorage` keeps only the user's id as a hint so pages can redirect to `/login` without a round trip, and any `401` from the API clears it and redirects.
 
-Downloads use `fetch()` + `URL.createObjectURL()` rather than a plain `<a href>` link, because browsers do not send custom headers on direct navigation.
+Because the browser sends the cookie automatically, downloads are plain `<a href>` links.
 
 ### backend (Express + TypeScript, port 4000)
 
 The backend is a thin gateway. Its jobs:
-1. Validate auth (`x-user-id` header → user lookup)
+1. Validate auth (session cookie → session store → user lookup)
 2. Handle file uploads (multer → temp file on disk)
 3. Create a job record, call the formatter, save the output file, update the job
 4. Serve download endpoints
@@ -94,7 +109,7 @@ The backend is a thin gateway. Its jobs:
 
 The formatter is a Python microservice. Node sends it the raw upload file + `profileId` + `documentType` via multipart form. It returns the formatted DOCX as raw bytes.
 
-#### Full pipeline (`documentType != "print_ready"`)
+#### Full pipeline (Thesis and Report)
 
 1. **Parse** — `docx_parser/parser.py` walks the DOCX XML and produces an ordered list of typed blocks:
    - `P#` — paragraph blocks (body text, headings, captions)
@@ -106,14 +121,16 @@ The formatter is a Python microservice. Node sends it the raw upload file + `pro
 3. **Format** — `formatting/formatter.py` orchestrates the pipeline in strict order. Ordering matters because early steps map block IDs to paragraph indices in `doc.paragraphs`, and that mapping breaks the moment any paragraph is inserted or removed:
    - `apply_basic_style` — fonts, spacing, margins, heading styles
    - `apply_headings` — applies Heading 1/2/3 styles to classified headings
+   - `_apply_proofreading` — LLM grammar/spelling corrections on body paragraphs (needs an API key; `DOCSTUDIO_PROOFREAD=0` disables)
    - `apply_tables_and_figures` — rewrites captions with `SEQ` fields, repositions captions (above tables, below figures), creates captions for uncaptioned figures
    - `format_references_section` — hanging-indent style for reference lists
-   - *Anchor resolution* — finds the first main-content paragraph as a live object before any insertions
-   - Prelim page insertion in reverse order (TOC, LOT, LOF, abbreviations), each inserted just before the anchor
-   - `apply_sections` — inserts the section break at the prelim/main boundary, applies roman numbering to prelim, Arabic to main
+   - *Thesis only:* anchor resolution — finds the first main-content paragraph as a live object before any insertions
+   - *Thesis only:* prelim page insertion in reverse order (TOC, LOT, LOF, abbreviations), each inserted just before the anchor
+   - *Thesis only:* `apply_sections` — inserts the section break at the prelim/main boundary, applies roman numbering to prelim, Arabic to main
+   - *Report only:* `add_arabic_page_numbers` — Arabic numbering from page 1
    - `enable_update_fields_on_open` — sets a Word document flag so TOC/LOT/LOF/SEQ/PAGE fields refresh automatically when opened
 
-#### Quick pipeline (`documentType == "print_ready"`)
+#### Quick pipeline (Quick Format, `documentType == "print_ready"`)
 
 Skips parsing, LLM, captions, references, and prelim pages entirely. Only runs `apply_basic_style` + `add_arabic_page_numbers` + `enable_update_fields_on_open`.
 
@@ -141,7 +158,7 @@ The extractor handles both by using Clark-notation namespace strings (e.g. `{urn
 
 ## Running locally
 
-Ports: frontend **3000**, backend **4000**, formatter-service **8082**.
+Ports: frontend **3000**, backend **4000**, formatter-service **8082**. The browser only ever talks to the frontend: requests to `/backend/*` are relayed to the backend (Next.js rewrite in `frontend/next.config.ts`), so the backend and formatter listen on localhost only.
 
 ```bash
 # 1. Formatter service (terminal 1)
@@ -150,20 +167,56 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 # Optional: an OpenRouter key enables LLM classification (heuristic otherwise)
 echo "OPENROUTER_API_KEY=sk-or-v1-..." > .env
-PYTHONUTF8=1 .venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8082
+PYTHONUTF8=1 .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8082
 
 # 2. Backend gateway (terminal 2)
 cd backend
 npm ci
-npm run dev    # starts on :4000
+npm run dev    # listens on 127.0.0.1:4000
 
 # 3. Frontend (terminal 3)
 cd frontend
 npm ci
-npm run dev    # starts on :3000  (or: npm run build && npm start)
+npm run dev    # http://localhost:3000
 ```
 
 Open http://localhost:3000 in your browser. Register an account — accounts and jobs persist to `backend/data/` and survive restarts.
+
+### Running on a server (access from another machine)
+
+Build the frontend and serve it on all interfaces; keep the other two on localhost:
+
+```bash
+cd frontend && npm run build && npx next start -H 0.0.0.0 -p 3000
+```
+
+Then browse to `http://<server-ip>:3000`. Only port 3000 needs to be reachable. For real users, serve it over HTTPS behind nginx and set `COOKIE_SECURE=true` (see Production below).
+
+### Production (the live server)
+
+The live site is **https://84-247-153-21.sslip.io** (a free hostname for the
+server's IP; swap in a real domain later and re-run certbot).
+
+| Piece | Where |
+|---|---|
+| Code | `/home/admin/apps/docstudio-prod` (a clone of this repo, separate from development) |
+| Data (users, jobs, sessions, feedback, documents) | `/home/admin/docstudio-data/{data,uploads}` |
+| Backups | `/home/admin/docstudio-data/backups` (daily at 02:30, last 14 kept) |
+| Secrets & settings | `/etc/docstudio/{formatter,backend,frontend}.env` (root-only) |
+| Services | `docstudio-formatter`, `docstudio-backend`, `docstudio-frontend` (systemd, start on boot) |
+| Web server | nginx (`deploy/nginx-docstudio.conf`) → Next.js on 127.0.0.1:3000; Let's Encrypt HTTPS, auto-renewed |
+
+Only nginx (80/443) is reachable from outside; everything else listens on
+127.0.0.1. Copies of the unit files, nginx config and scripts are in `deploy/`.
+
+```bash
+/home/admin/apps/docstudio-prod/deploy/deploy.sh      # pull, rebuild, restart
+journalctl -u docstudio-backend -f                    # logs (also -formatter, -frontend)
+sudo systemctl restart docstudio-backend              # restart one service
+```
+
+Feedback and usage: open `/admin` on the site and enter `ADMIN_KEY` from
+`/etc/docstudio/backend.env`.
 
 ### Tests and output inspection
 
@@ -183,7 +236,7 @@ cd ../frontend && npx tsc --noEmit && npm run build
 | Variable | Default | Effect |
 |---|---|---|
 | `OPENROUTER_API_KEY` | — | Enables LLM classification; without it the heuristic classifier is used |
-| `LLM_MODEL` | `x-ai/grok-4.1-fast:free` | Primary OpenRouter model (then `openai/gpt-4o-mini`, `openai/gpt-4.1-nano`) |
+| `LLM_MODEL` | `openai/gpt-4o-mini` | Primary OpenRouter model for classification and proofreading (then `openai/gpt-4.1-mini`, `openai/gpt-4.1-nano`) |
 | `LLM_TIMEOUT_SECONDS` | `60` | Per-model request timeout |
 | `DOCSTUDIO_BAKE_FIELDS` | `1` | Bake TOC/SEQ results via headless LibreOffice when installed; `0` to skip |
 | `DOCSTUDIO_PROOFREAD` | `1` | LLM grammar/spelling pass (only runs with an API key); `0` to disable |
@@ -193,8 +246,22 @@ cd ../frontend && npx tsc --noEmit && npm run build
 | Variable | Default | Effect |
 |---|---|---|
 | `PORT` | `4000` | Backend port |
+| `HOST` | `127.0.0.1` | Backend bind address; `0.0.0.0` to expose it directly |
 | `FORMATTER_URL` | `http://localhost:8082` | Formatter-service base URL |
 | `FORMATTER_TIMEOUT_MS` | `300000` | Max time to wait for one formatting job |
+| `DATA_DIR` / `UPLOAD_DIR` | `backend/data`, `backend/uploads` | Where runtime data and documents are stored |
+| `ADMIN_KEY` | — | Enables `/admin` (usage, failures, feedback); disabled when unset |
+| `COOKIE_SECURE` | `false` | Set `true` when served over HTTPS |
+| `BILLING_ENABLED` | `false` | `true` restores the free quota + per-type prices |
+| `DAILY_JOB_LIMIT` | `30` | Documents per user per 24 h (`0` = unlimited) |
+| `MAX_UPLOAD_MB` | `25` | Upload size limit |
+
+### Environment variables (frontend)
+
+| Variable | Default | Effect |
+|---|---|---|
+| `BACKEND_URL` | `http://127.0.0.1:4000` | Where the `/backend/*` relay forwards to (read at **build** time) |
+| `NEXT_PUBLIC_API_BASE` | `/backend` | Base URL the browser uses for API calls; set to call a backend directly |
 
 ---
 
@@ -222,6 +289,6 @@ backend/
 
 **Add a new formatting profile:** Add an entry to `backend/config/formattingRules.json` (the profile schema is defined in `formatter-service/config/profiles.py`). The new profile will appear automatically in the upload form's profile dropdown.
 
-**Change the LLM:** Set `LLM_MODEL` in `formatter-service/.env` to any model available on OpenRouter. The classifier's prompt is in `formatter-service/llm/client.py`.
+**Change the LLM:** Set `LLM_MODEL` in `formatter-service/.env` to any model available on OpenRouter. The classifier's prompt is in `formatter-service/llm/prompt_builder.py`; the model list is in `formatter-service/llm/client.py`.
 
 **Add a new prelim page type:** Add a key to `_GENERATED_PRELIM_ITEMS` in `formatting/formatter.py`, add the insertion logic in the loop, and add the key to the profile's `structure.order` array.

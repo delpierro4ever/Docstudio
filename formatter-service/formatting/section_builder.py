@@ -99,6 +99,7 @@ def _apply_prelim_page_numbering(section) -> None:
     _set_page_number_format(section, fmt="lowerRoman", start=1)
 
     _ensure_page_field_in_footer(footer)
+    _reset_even_page_footer(section)
 
 
 def _apply_main_page_numbering(section, restart_at_1: bool = False) -> None:
@@ -114,6 +115,18 @@ def _apply_main_page_numbering(section, restart_at_1: bool = False) -> None:
     _set_page_number_format(section, fmt="decimal", start=start_val)
 
     _ensure_page_field_in_footer(footer)
+    _reset_even_page_footer(section)
+
+
+def _reset_even_page_footer(section) -> None:
+    """
+    Documents with different odd/even footers show the even-page footer on
+    every other page; give it the same bare page number. The first-page
+    footer (cover pages) is left alone on purpose.
+    """
+    even = section.even_page_footer
+    if not even.is_linked_to_previous:
+        _ensure_page_field_in_footer(even)
 
 
 def _set_page_number_format(section, fmt: str, start: Optional[int] = None) -> None:
@@ -145,22 +158,16 @@ def add_arabic_page_numbers(doc: Document) -> None:
 
 def _ensure_page_field_in_footer(footer) -> None:
     """
-    Insert a { PAGE } field in the footer, right-aligned, if not already
-    present.
+    Make the footer hold exactly one right-aligned paragraph containing a
+    bare { PAGE } field: just the number, no "Page" / "of N" text. Any
+    existing footer content (text, other fields, tables) is removed.
     """
-    para = None
-    for existing in footer.paragraphs:
-        if any(
-            fld is not None
-            for fld in existing._p.iter(qn("w:fldChar"))
-        ):
-            return  # a field already lives here
-        para = existing
+    footer_el = footer._element
+    for child in list(footer_el):
+        if child.tag in (qn("w:p"), qn("w:tbl"), qn("w:sdt")):
+            footer_el.remove(child)
 
-    if para is None:
-        para = footer.add_paragraph()
-
-    para.clear()
+    para = footer.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     # Build complex field: { PAGE }

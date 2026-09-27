@@ -148,20 +148,6 @@ export default function CenterPage() {
     return d.toLocaleString();
   }
 
-  function docTypeLabel(type: string) {
-    switch (type) {
-      case "report":
-        return "Student Report";
-      case "undergraduate":
-        return "Undergraduate Thesis";
-      case "masters":
-        return "Masters Thesis";
-      case "phd":
-        return "PhD Thesis";
-      default:
-        return type;
-    }
-  }
 
   if (loading) {
     return (

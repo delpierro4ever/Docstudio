@@ -104,8 +104,35 @@ def normalize_classification(
         boundary = (fallback.get("sections", {}) or {}).get("prelim_ends_before_block_id")
     sections["prelim_ends_before_block_id"] = boundary
 
+    _assign_media_chapters(blocks, classified)
+
     data["blocks"] = classified
     data["sections"] = sections
     if not isinstance(data.get("structure"), dict) or not data["structure"]:
         data["structure"] = fallback.get("structure", {}) or {}
     return data
+
+
+def _assign_media_chapters(
+    blocks: List[Dict[str, Any]],
+    classified: Dict[str, Any],
+) -> None:
+    """
+    Set each table/figure's chapter from its position: the chapter of the
+    nearest preceding chapter_heading. LLMs often omit or misnumber this,
+    which would caption a Chapter 2 table as "Table 1.1".
+    """
+    current = 0
+    for block in blocks:
+        meta = classified.get(block.get("id"))
+        if not meta:
+            continue
+        role = meta.get("role")
+        if role == "chapter_heading":
+            try:
+                current = int(meta.get("chapter"))
+            except (TypeError, ValueError):
+                current += 1
+            meta["chapter"] = current
+        elif role in ("table", "figure"):
+            meta["chapter"] = current or 1

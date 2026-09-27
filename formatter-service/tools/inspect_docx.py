@@ -56,14 +56,17 @@ def inspect_docx(path: str) -> Dict[str, Any]:
     for i, sec in enumerate(doc.sections):
         pg = sec._sectPr.find(qn("w:pgNumType"))
         footer_fields: List[str] = []
+        footer_text = ""
         if not sec.footer.is_linked_to_previous:
             footer_fields = _instr_texts(sec.footer._element)
+            footer_text = "".join(t.text or "" for t in sec.footer._element.iter(qn("w:t")))
         sections.append({
             "index": i,
             "page_number_format": pg.get(qn("w:fmt")) if pg is not None else None,
             "page_number_start": pg.get(qn("w:start")) if pg is not None else None,
             "footer_linked_to_previous": sec.footer.is_linked_to_previous,
             "footer_fields": footer_fields,
+            "footer_text": footer_text,
             "first_text": next(
                 (p["text"] for p in paragraphs
                  if p["section"] == i and p["kind"] == "paragraph" and p["text"].strip()),
@@ -105,7 +108,7 @@ def _print_report(report: Dict[str, Any]) -> None:
     print("SECTIONS")
     for s in report["sections"]:
         print(f"  [{s['index']}] numbering={s['page_number_format']} start={s['page_number_start']} "
-              f"footer_fields={s['footer_fields']} first_text={s['first_text']!r}")
+              f"footer_fields={s['footer_fields']} footer_text={s['footer_text']!r} first_text={s['first_text']!r}")
     print("PRELIM TEXT (section 0)")
     for t in report["prelim_texts"]:
         print(f"  {t!r}")
